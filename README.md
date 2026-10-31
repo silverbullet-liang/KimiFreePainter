@@ -70,7 +70,7 @@
 ```bash
 git clone https://github.com/silverbullet-liang/KimiFreePainter.git
 cd KimiFreePainter
-./gradlew assembleDebug
+gradle assembleDebug
 ```
 
 要求：Android Studio Hedgehog+ / JDK 17 / Android SDK 35。
