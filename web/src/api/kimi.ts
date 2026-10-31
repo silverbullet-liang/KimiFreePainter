@@ -161,6 +161,7 @@ export type Image = {
 
 export type Moment = {
   id: string
+  title: string
   text: string
   source: string
   createTime: number
@@ -195,6 +196,7 @@ function parseMoment(m: any): Moment {
   const src = String(content?.source ?? '').trim().toUpperCase()
   return {
     id: m?.id ?? '',
+    title: content?.title ?? '',
     text: content?.text ?? '',
     source: src,
     createTime: parseTime(m?.createTime),

@@ -60,7 +60,8 @@ a.primary { display: block; text-align: center; text-decoration: none; }
 @keyframes pulse { 0%,100% { opacity: .35; } 50% { opacity: 1; } }
 .card.result img, .sheet-inner img { width: 100%; border-radius: 12px; display: block; }
 .card.result { display: flex; flex-direction: column; gap: 10px; }
-.caption { margin: 0; font-size: 14px; color: var(--fg); }
+.title { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: .2px; }
+.caption { margin: 0; font-size: 14px; color: var(--fg); white-space: pre-wrap; }
 .caption.sub { color: var(--muted); font-size: 13px; }
 .error { color: var(--err); font-size: 13px; margin: 0; }
 .hint { color: var(--muted); font-size: 13px; margin: 4px 0 10px; }

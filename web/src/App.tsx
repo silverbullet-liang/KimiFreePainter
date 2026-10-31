@@ -21,7 +21,16 @@ import {
 
 type Status = 'idle' | 'posting' | 'waiting' | 'done' | 'failed'
 type Tab = 'paint' | 'history' | 'settings'
-type Record = { id: string; prompt: string; caption: string; images: string[]; at: number }
+type Record = {
+  id: string
+  prompt: string
+  title: string
+  caption: string
+  images: string[]
+  at: number
+  triggerId: string
+  cleaned?: boolean
+}
 
 const HIST = 'kfp_history'
 const MAX_PROMPT = 500
@@ -159,20 +168,24 @@ export default function App() {
       const record: Record = {
         id: hit.id,
         prompt: text,
-        caption: hit.text,
+        title: hit.title,
+        caption: cleanCaption(hit.text),
         images: hit.images.map((i) => i.originUrl || i.downloadUrl),
-        at: Date.now()
+        at: Date.now(),
+        triggerId
       }
       setResult(record)
       setHistory((h) => [record, ...h.filter((x) => x.id !== record.id)].slice(0, 40))
       setStatus('done')
       setPrompt('')
 
+      // 清理：立即执行，结果写回本条记录，界面能看到成功与否
       if (clean !== 'none') {
-        setTimeout(() => {
-          deleteMoment(triggerId).catch(() => {})
-          if (clean === 'all') deleteMoment(hit!.id).catch(() => {})
-        }, 30_000)
+        const ok = await cleanPosts(triggerId, clean === 'all' ? hit.id : '')
+        setResult((r) => (r ? { ...r, cleaned: ok } : r))
+        setHistory((list) =>
+          list.map((x) => (x.id === record.id ? { ...x, cleaned: ok } : x))
+        )
       }
     } catch (e) {
       setStatus('failed')
@@ -231,12 +244,44 @@ export default function App() {
             {result && (
               <div className="card result">
                 {result.images.map((src) => (
-                  <img key={src} src={src} alt={result.caption} referrerPolicy="no-referrer" />
+                  <img
+                    key={src}
+                    src={src}
+                    alt={result.title || result.caption}
+                    referrerPolicy="no-referrer"
+                  />
                 ))}
-                <p className="caption">{result.caption || '已完成'}</p>
-                <a className="primary ghost" href={result.images[0]} download target="_blank" rel="noreferrer">
-                  保存图片
-                </a>
+                {result.title && <p className="title">{result.title}</p>}
+                {result.caption && <p className="caption">{result.caption}</p>}
+                {result.cleaned !== undefined && (
+                  <p className="hint">
+                    {result.cleaned ? '社区帖子已清理' : '帖子清理失败，可在历史里重试'}
+                  </p>
+                )}
+                <div className="row">
+                  <a
+                    className="primary ghost"
+                    href={result.images[0]}
+                    download
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    保存图片
+                  </a>
+                  <button
+                    className="ghost"
+                    onClick={async () => {
+                      if (!window.confirm('删除后社区里的图片将无法访问。是否同时删除触发帖与作品帖？')) return
+                      const ok = await cleanPosts(result.triggerId, result.id)
+                      setResult({ ...result, cleaned: ok })
+                      setHistory((l) =>
+                        l.map((x) => (x.id === result.id ? { ...x, cleaned: ok } : x))
+                      )
+                    }}
+                  >
+                    删除社区帖
+                  </button>
+                </div>
               </div>
             )}
 
@@ -365,10 +410,26 @@ export default function App() {
             .filter((h) => h.id === openId)
             .map((h) => (
               <div className="sheet-inner" key={h.id} onClick={(e) => e.stopPropagation()}>
-                {h.images[0] && <img src={h.images[0]} alt={h.caption} referrerPolicy="no-referrer" />}
-                <p className="caption">{h.prompt}</p>
-                {h.caption && <p className="caption sub">{h.caption}</p>}
-                <a className="primary" href={h.images[0]} download target="_blank" rel="noreferrer">保存图片</a>
+                {h.images[0] && <img src={h.images[0]} alt={h.title || h.caption} referrerPolicy="no-referrer" />}
+                {h.title && <p className="title">{h.title}</p>}
+                {h.caption && <p className="caption">{h.caption}</p>}
+                <p className="caption sub">提示词：{h.prompt}</p>
+                <div className="row">
+                  <a className="primary" href={h.images[0]} download target="_blank" rel="noreferrer">
+                    保存图片
+                  </a>
+                  <button
+                    className="ghost"
+                    onClick={async () => {
+                      if (!window.confirm('删除后社区里的图片将无法访问，确认删除这两个帖子？')) return
+                      const ok = await cleanPosts(h.triggerId, h.id)
+                      setHistory((l) => l.map((x) => (x.id === h.id ? { ...x, cleaned: ok } : x)))
+                      setOpenId(null)
+                    }}
+                  >
+                    删除社区帖
+                  </button>
+                </div>
               </div>
             ))}
         </div>
@@ -379,6 +440,34 @@ export default function App() {
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms))
+}
+
+/** 成品帖正文尾部会带「—— AI画师」署名与「@AI画师 提示词 ——昵称」的引用块，展示时截掉。 */
+function cleanCaption(raw: string): string {
+  return (raw || '')
+    .replace(/\n\s*@AI画师[\s\S]*$/, '')
+    .replace(/\n\s*[—–-]{1,3}\s*AI画师\s*$/g, '')
+    .trim()
+}
+
+/** 删帖：返回是否全部成功。结果页与历史详情都复用这一处。 */
+async function cleanPosts(triggerId: string, resultId?: string): Promise<boolean> {
+  let ok = true
+  if (triggerId) {
+    try {
+      await deleteMoment(triggerId)
+    } catch {
+      ok = false
+    }
+  }
+  if (resultId) {
+    try {
+      await deleteMoment(resultId)
+    } catch {
+      ok = false
+    }
+  }
+  return ok
 }
 
 /**
