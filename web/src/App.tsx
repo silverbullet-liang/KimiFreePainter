@@ -79,9 +79,13 @@ export default function App() {
     setWaited(0)
     setStatus('posting')
     try {
-      const bots = await listBots()
-      const bot = bots.find((b) => b.name.includes('画师')) ?? bots[0]
-      if (!bot) throw new Error('未找到可 @ 的画师')
+      // 机器人列表拿不到也不阻断：正文里的 @ 才是真正触发的那一环
+      const bots = await listBots().catch(() => [])
+      const AI_BOT = 'AI画师'
+      const bot =
+        bots.find((b) => b.name.replace(/\s+/g, '') === AI_BOT) ??
+        bots.find((b) => b.name.includes('画师'))
+      const botId = bot?.userId ?? ''
 
       // 发帖前先记下当前已存在的全部动态 id，之后只认「新出现的」
       const before = await listMyFeeds(20)
@@ -89,7 +93,7 @@ export default function App() {
       history.forEach((h) => knownIds.add(h.id))
       const watermark = before.reduce((m, x) => Math.max(m, x.createTime), 0)
 
-      const triggerId = await createMoment(text, bot.userId, bot.name)
+      const triggerId = await createMoment(text, botId, AI_BOT)
       if (!triggerId) throw new Error('发帖未返回动态 ID，请稍后重试')
       knownIds.add(triggerId)
       setStatus('waiting')
@@ -114,6 +118,10 @@ export default function App() {
         )
         if (rounds <= 3 && !feeds.some((f) => f.id === triggerId)) {
           console.warn(`[probe] 第 ${rounds} 轮仍看不到刚发布的触发帖，列表可能取不到最新数据`)
+        }
+        const self = feeds.find((f) => f.id === triggerId)
+        if (self && rounds === 1) {
+          console.debug('[probe] 触发帖正文:', self.text)
         }
         hit =
           pickNewArtifact(feeds, triggerId, knownIds, text) ??

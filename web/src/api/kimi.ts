@@ -215,15 +215,21 @@ export async function listBots(): Promise<Bot[]> {
 }
 
 export async function createMoment(
-  text: string,
+  prompt: string,
   botId: string,
   botName: string
 ): Promise<string> {
-  const r = await call<{ moment?: { id?: string } }>('/moment.v1.MomentService/CreateMoment', {
+  const mention = `@${botName}`
+  // 平台靠正文里的 @ 文本定位目标：只发 mentions 字段不会在动态里出现 @，
+  // 机器人也就收不到。两者同时给，正文里的 @ 才是真正生效的那个。
+  const text = prompt.includes(mention) ? prompt : `${mention} ${prompt}`
+  const body: { [k: string]: unknown } = {
     text,
-    visibility: 'MOMENT_VISIBILITY_PUBLIC',
-    mentions: [{ userId: botId, name: botName }]
-  })
+    visibility: 'MOMENT_VISIBILITY_PUBLIC'
+  }
+  // 拿不到机器人 userId 时只发正文 @：多一个空 id 反而可能被判参数非法
+  if (botId) body.mentions = [{ userId: botId, name: botName }]
+  const r = await call<{ moment?: { id?: string } }>('/moment.v1.MomentService/CreateMoment', body)
   return r.moment?.id ?? ''
 }
 
