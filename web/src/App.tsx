@@ -13,6 +13,7 @@ import {
   listComments,
   listMyFeeds,
   loadTokens,
+  pickNewArtifact,
   pickResult,
   saveTokens,
   type Moment
@@ -82,35 +83,68 @@ export default function App() {
       const bot = bots.find((b) => b.name.includes('画师')) ?? bots[0]
       if (!bot) throw new Error('未找到可 @ 的画师')
 
-      const before = await listMyFeeds()
+      // 发帖前先记下当前已存在的全部动态 id，之后只认「新出现的」
+      const before = await listMyFeeds(20)
+      const knownIds = new Set(before.map((m) => m.id))
+      history.forEach((h) => knownIds.add(h.id))
       const watermark = before.reduce((m, x) => Math.max(m, x.createTime), 0)
+
       const triggerId = await createMoment(text, bot.userId, bot.name)
+      if (!triggerId) throw new Error('发帖未返回动态 ID，请稍后重试')
+      knownIds.add(triggerId)
       setStatus('waiting')
 
-      const seen = new Set(history.map((h) => h.id))
       const deadline = Date.now() + 300_000
       let hit: Moment | null = null
       let rounds = 0
       while (Date.now() < deadline) {
         await sleep(Math.max(8, poll) * 1000)
-        const feeds = await listMyFeeds()
-        hit = pickResult(feeds, watermark, seen)
-        if (hit) break
         rounds++
-        if (rounds % 3 === 0) {
-          const cs = await listComments(triggerId).catch(() => [])
-          const bot2 = cs.find((c) => c.type === 'COMMENT_TYPE_BOT' || c.aiGenerated)
-          if (bot2) {
-            for (const id of extractMomentIds(bot2.text)) {
-              const m = await getMoment(id).catch(() => null)
-              if (m && m.source === AI_SOURCE && m.images.length) {
-                hit = m
-                break
-              }
+        const feeds = await listMyFeeds(20)
+        // 诊断日志：出问题时在控制台能看到每轮抓到了什么
+        console.debug(
+          `[probe ${rounds}]`,
+          feeds.map((f) => ({
+            id: f.id.slice(-6),
+            src: f.source,
+            img: f.images.length,
+            t: f.createTime,
+            known: knownIds.has(f.id)
+          }))
+        )
+        if (rounds <= 3 && !feeds.some((f) => f.id === triggerId)) {
+          console.warn(`[probe] 第 ${rounds} 轮仍看不到刚发布的触发帖，列表可能取不到最新数据`)
+        }
+        hit =
+          pickNewArtifact(feeds, triggerId, knownIds, text) ??
+          pickResult(feeds, watermark, knownIds)
+        if (hit) break
+
+        // 列表接口可能不返回图片字段：对新出现的帖再拉一次详情确认
+        const freshAny = feeds.filter((f) => f.id !== triggerId && !knownIds.has(f.id))
+        for (const cand of freshAny) {
+          const detail = await getMoment(cand.id).catch(() => null)
+          if (detail && detail.images.length > 0) {
+            hit = detail
+            break
+          }
+        }
+        if (hit) break
+
+        // 每轮都做一次评论兜底：触发帖下的机器人回复里有成品帖链接
+        const cs = await listComments(triggerId).catch(() => [])
+        const reply = cs.find((c) => c.type === 'COMMENT_TYPE_BOT' || c.aiGenerated)
+        if (reply) {
+          console.debug('[probe] bot reply', reply.text.slice(0, 120))
+          for (const id of extractMomentIds(reply.text)) {
+            const m = await getMoment(id).catch(() => null)
+            if (m && m.images.length && (m.source === AI_SOURCE || !knownIds.has(m.id))) {
+              hit = m
+              break
             }
           }
-          if (hit) break
         }
+        if (hit) break
       }
       if (!hit) throw new Error('等待超时，可稍后在历史里查看')
 

@@ -177,17 +177,26 @@ function parseTime(v: unknown): number {
   return Number.isNaN(d) ? 0 : Math.floor(d / 1000)
 }
 
+function normImg(i: any): Image | null {
+  if (!i) return null
+  if (typeof i === 'string') {
+    return { originUrl: i, downloadUrl: i }
+  }
+  const origin = i.originUrl || i.origin_url || i.url || i.imageUrl || i.image_url || ''
+  const download = i.downloadUrl || i.download_url || i.url || origin
+  if (!origin && !download) return null
+  return { originUrl: origin, downloadUrl: download, extra: i.extra }
+}
+
 function parseMoment(m: any): Moment {
   const content = m?.content ?? {}
-  const images: Image[] = (content?.media?.images ?? []).map((i: any) => ({
-    originUrl: i?.originUrl ?? '',
-    downloadUrl: i?.downloadUrl ?? '',
-    extra: i?.extra
-  }))
+  const raw: any[] = content?.media?.images ?? []
+  const images: Image[] = raw.map(normImg).filter((x): x is Image => !!x)
+  const src = String(content?.source ?? '').trim().toUpperCase()
   return {
     id: m?.id ?? '',
     text: content?.text ?? '',
-    source: content?.source ?? '',
+    source: src,
     createTime: parseTime(m?.createTime),
     authorId: m?.author?.userId ?? '',
     images
@@ -222,10 +231,10 @@ export async function deleteMoment(momentId: string): Promise<void> {
   await call('/moment.v1.MomentService/DeleteMoment', { momentId })
 }
 
-export async function listMyFeeds(): Promise<Moment[]> {
+export async function listMyFeeds(pageSize = 20): Promise<Moment[]> {
   const r = await call<{ feeds?: any[] }>('/moment.v1.FeedService/ListFeeds', {
     category: 'FEED_CATEGORY_USER_PUBLISH',
-    pageSize: 10
+    pageSize
   })
   return (r.feeds ?? []).map((f) => parseMoment(f?.moment)).filter((m) => m.id)
 }
@@ -267,6 +276,28 @@ export function pickResult(
       (m) => m.source === AI_SOURCE && m.createTime >= watermark && m.images.length > 0 && !seen.has(m.id)
     ) ?? null
   )
+}
+
+/**
+ * 按「新增 id」识别成品帖——不依赖 createTime 的时钟与单位，比水位线稳。
+ * 判据分三档：AI 来源 > 正文不是自己的提示词 > 只要是新出现且带图的帖。
+ * 成品帖的 author 是发起人自己，所以 author 不能用来区分。
+ */
+export function pickNewArtifact(
+  feeds: Moment[],
+  triggerId: string,
+  knownIds: Set<string>,
+  prompt: string
+): Moment | null {
+  const fresh = feeds.filter(
+    (m) => m.id && m.id !== triggerId && !knownIds.has(m.id) && m.images.length > 0
+  )
+  if (fresh.length === 0) return null
+  const bySource = fresh.find((m) => m.source === AI_SOURCE)
+  if (bySource) return bySource
+  const p = prompt.trim()
+  const byText = fresh.find((m) => (m.text ?? '').trim() !== p)
+  return byText ?? fresh[0]
 }
 
 export function extractMomentIds(text: string): string[] {
