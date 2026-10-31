@@ -33,7 +33,6 @@ type Record = {
 }
 
 const HIST = 'kfp_history'
-const MAX_PROMPT = 500
 
 function loadHistory(): Record[] {
   try {
@@ -234,11 +233,17 @@ export default function App() {
             <div className="field">
               <textarea
                 value={prompt}
-                onChange={(e) => setPrompt(e.target.value.slice(0, MAX_PROMPT))}
+                onChange={(e) => {
+                  setPrompt(e.target.value)
+                  // 长提示词自动撑高，超出视口后再内部滚动
+                  const el = e.currentTarget
+                  el.style.height = 'auto'
+                  el.style.height = `${el.scrollHeight}px`
+                }}
                 placeholder="描述你想要的画面"
                 rows={5}
               />
-              <div className="counter">{prompt.length} / {MAX_PROMPT}</div>
+              <div className="counter">{prompt.length} 字</div>
             </div>
 
             <button className="primary" onClick={start} disabled={!prompt.trim() || status === 'posting' || status === 'waiting'}>
