@@ -166,6 +166,7 @@ export type Moment = {
   source: string
   createTime: number
   authorId: string
+  refMomentId: string
   images: Image[]
 }
 
@@ -201,6 +202,7 @@ function parseMoment(m: any): Moment {
     source: src,
     createTime: parseTime(m?.createTime),
     authorId: m?.author?.userId ?? '',
+    refMomentId: m?.refMomentId ?? m?.content?.refMomentId ?? '',
     images
   }
 }
@@ -256,9 +258,16 @@ export async function getMoment(id: string): Promise<Moment | null> {
   return m ? parseMoment(m) : null
 }
 
-export async function listComments(momentId: string): Promise<
-  { id: string; type: string; aiGenerated: boolean; text: string }[]
-> {
+export type Comment = {
+  id: string
+  type: string
+  aiGenerated: boolean
+  text: string
+  /** 富文本链接：机器人回复里的「查看作品」是超链接，URL 只在 links 里，正文拿不到 */
+  links: string[]
+}
+
+export async function listComments(momentId: string): Promise<Comment[]> {
   const r = await call<{ comments?: any[] }>('/moment.v1.CommentService/ListComments', {
     momentId,
     pageSize: 20
@@ -267,7 +276,12 @@ export async function listComments(momentId: string): Promise<
     id: c.id ?? '',
     type: c.type ?? '',
     aiGenerated: !!c.aiGenerated,
-    text: c?.content?.text ?? ''
+    text: c?.content?.text ?? '',
+    links: (c?.links ?? c?.content?.links ?? [])
+      .map((l: any) =>
+        typeof l === 'string' ? l : l?.url || l?.linkUrl || l?.href || l?.link || ''
+      )
+      .filter((u: string) => !!u)
   }))
 }
 

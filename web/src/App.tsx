@@ -110,6 +110,7 @@ export default function App() {
       const deadline = Date.now() + 300_000
       let hit: Moment | null = null
       let rounds = 0
+      let diag = ''
       while (Date.now() < deadline) {
         await sleep(Math.max(8, poll) * 1000)
         rounds++
@@ -132,13 +133,22 @@ export default function App() {
         if (self && rounds === 1) {
           console.debug('[probe] 触发帖正文:', self.text)
         }
-        hit =
-          pickNewArtifact(feeds, triggerId, knownIds, text) ??
-          pickResult(feeds, watermark, knownIds)
+        diag = `抓到 ${feeds.length} 条 / 带图 ${feeds.filter((x) => x.images.length > 0).length} 条 / AI来源 ${
+          feeds.filter((x) => x.source === AI_SOURCE).length
+        } 条 / 含引用 ${feeds.filter((x) => x.refMomentId).length} 条`
+
+        // 判据一：成品帖会带上它引用的动态 id（最直接）
+        hit = feeds.find((x) => x.refMomentId && x.refMomentId === triggerId) ?? null
+        // 判据二：新出现且带图的帖
+        if (!hit) {
+          hit =
+            pickNewArtifact(feeds, triggerId, knownIds, text) ??
+            pickResult(feeds, watermark, knownIds)
+        }
         if (hit) break
 
-        // 列表接口可能不返回图片字段：对新出现的帖再拉一次详情确认
-        const freshAny = feeds.filter((f) => f.id !== triggerId && !knownIds.has(f.id))
+        // 判据三：列表可能不带图，对新出现的帖逐个回查详情
+        const freshAny = feeds.filter((x) => x.id !== triggerId && !knownIds.has(x.id))
         for (const cand of freshAny) {
           const detail = await getMoment(cand.id).catch(() => null)
           if (detail && detail.images.length > 0) {
@@ -148,22 +158,25 @@ export default function App() {
         }
         if (hit) break
 
-        // 每轮都做一次评论兜底：触发帖下的机器人回复里有成品帖链接
+        // 判据四：触发帖下的机器人回复。链接是富文本，URL 在 links 里而不是正文
         const cs = await listComments(triggerId).catch(() => [])
         const reply = cs.find((c) => c.type === 'COMMENT_TYPE_BOT' || c.aiGenerated)
         if (reply) {
-          console.debug('[probe] bot reply', reply.text.slice(0, 120))
-          for (const id of extractMomentIds(reply.text)) {
-            const m = await getMoment(id).catch(() => null)
-            if (m && m.images.length && (m.source === AI_SOURCE || !knownIds.has(m.id))) {
-              hit = m
-              break
+          console.debug('[probe] bot reply', reply.links, reply.text.slice(0, 80))
+          for (const u of [...reply.links, reply.text]) {
+            for (const id of extractMomentIds(u)) {
+              const m = await getMoment(id).catch(() => null)
+              if (m && (m.images.length > 0 || m.source === AI_SOURCE)) {
+                hit = m
+                break
+              }
             }
+            if (hit) break
           }
         }
         if (hit) break
       }
-      if (!hit) throw new Error('等待超时，可稍后在历史里查看')
+      if (!hit) throw new Error(`等待超时。诊断：${diag}`)
 
       const record: Record = {
         id: hit.id,
