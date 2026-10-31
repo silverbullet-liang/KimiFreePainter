@@ -1,0 +1,41 @@
+
+# Android
+*.iml
+.gradle/
+local.properties
+.idea/
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.keystore
+*.jks
+keystore.properties
+release.keystore
+
+# Web
+web/node_modules/
+web/dist/
+web/.vite/
+web/*.local
+
+# 通用
+.DS_Store
+Thumbs.db
+*.log
+*.swp
+*.swo
+*~
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+*.code-workspace
+
+# 敏感文件
+secrets.properties
+secrets.json

@@ -1,0 +1,71 @@
+
+name: Bug 报告
+description: 报告一个可复现的问题
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！提交前请确认：
+        - 已阅读 [DISCLAIMER.md](../../DISCLAIMER.md)
+        - 已搜索现有 Issue，未找到重复
+        - 使用的是最新 Release 版本
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 平台
+      options:
+        - Android
+        - Web
+    validations:
+      required: true
+
+  - type: input
+    id: app-version
+    attributes:
+      label: App 版本
+      placeholder: 如 1.0.0
+    validations:
+      required: true
+
+  - type: input
+    id: os-version
+    attributes:
+      label: 系统 / 浏览器版本
+      placeholder: 如 Android 14 (API 34) / Chrome 120
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 打开 App
+        2. 进入设置页
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志（可选）
+      description: Android 用 logcat 抓取；Web 用浏览器控制台
+      render: shell

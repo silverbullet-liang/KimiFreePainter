@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">免费画师</string>
+    <string name="tab_paint">生图</string>
+    <string name="tab_history">历史</string>
+    <string name="tab_settings">设置</string>
+
+    <string name="paint_title">开始创作</string>
+    <string name="paint_hint">描述你想要的画面</string>
+    <string name="paint_counter">%1$d / %2$d</string>
+    <string name="paint_submit">开始创作</string>
+    <string name="paint_clear">清空</string>
+    <string name="paint_empty_title">还没有作品</string>
+    <string name="paint_empty_desc">输入提示词，画师会为你开始创作</string>
+    <string name="paint_recent">最近作品</string>
+
+    <string name="state_queued">排队中</string>
+    <string name="state_posting">正在提交</string>
+    <string name="state_generating">画师正在创作</string>
+    <string name="state_downloading">正在取回作品</string>
+    <string name="state_cleaning">正在清理</string>
+    <string name="state_done">完成</string>
+    <string name="state_failed">失败</string>
+    <string name="state_cancelled">已取消</string>
+    <string name="state_wait">已等待 %1$d 秒</string>
+
+    <string name="action_cancel">取消</string>
+    <string name="action_retry">重试</string>
+    <string name="action_save">保存图片</string>
+    <string name="action_delete">删除</string>
+    <string name="action_close">关闭</string>
+    <string name="action_redelete">手动重删</string>
+    <string name="action_confirm">确定</string>
+
+    <string name="save_success">已保存到相册</string>
+    <string name="save_failed">保存失败，请检查存储空间</string>
+
+    <string name="history_empty_title">还没有作品</string>
+    <string name="history_empty_desc">完成一次创作后会出现在这里</string>
+    <string name="history_delete_confirm">删除这条记录？</string>
+    <string name="history_delete_desc">本地记录和图片都会被删除，不影响社区内容</string>
+    <string name="history_detail">作品详情</string>
+    <string name="history_prompt">提示词</string>
+    <string name="history_caption">画师描述</string>
+
+    <string name="settings_account">账号</string>
+    <string name="settings_sign_in">登录</string>
+    <string name="settings_sign_out">退出登录</string>
+    <string name="settings_token_valid">登录态有效</string>
+    <string name="settings_token_invalid">登录态已失效</string>
+    <string name="settings_refresh_days">刷新态剩余 %1$d 天</string>
+    <string name="settings_refresh_unknown">刷新态剩余天数未知</string>
+    <string name="settings_create">创作</string>
+    <string name="settings_clean_mode">清理方式</string>
+    <string name="settings_clean_none">不清理</string>
+    <string name="settings_clean_trigger">只删触发帖</string>
+    <string name="settings_clean_all">触发帖与作品帖都删</string>
+    <string name="settings_clean_delay">清理延迟</string>
+    <string name="settings_poll">轮询间隔</string>
+    <string name="settings_timeout">单任务超时</string>
+    <string name="settings_bot">画师</string>
+    <string name="settings_bot_unknown">首次创作时自动识别</string>
+    <string name="settings_history">历史</string>
+    <string name="settings_auto_clean">自动清理</string>
+    <string name="settings_clear_history">清空历史</string>
+    <string name="settings_about">关于</string>
+    <string name="settings_version">版本</string>
+    <string name="settings_license">开源协议</string>
+    <string name="settings_privacy">隐私声明</string>
+    <string name="settings_disclaimer">免责声明</string>
+
+    <string name="login_title">登录</string>
+    <string name="login_desc">在下方页面完成登录，登录态会自动保存</string>
+    <string name="login_save">已登录，保存</string>
+    <string name="login_checking">正在检测登录态</string>
+    <string name="login_found">已检测到登录态</string>
+    <string name="login_not_found">尚未检测到登录态，请先在页面内完成登录</string>
+
+    <string name="err_network">网络不可用，任务已暂停</string>
+    <string name="err_need_login">需要先完成登录</string>
+    <string name="err_rate_limited">请求太频繁，%1$d 秒后自动继续</string>
+    <string name="err_service">服务暂时不可用，请稍后重试</string>
+    <string name="err_generic">出现问题，请稍后重试</string>
+    <string name="err_prompt_empty">提示词不能为空</string>
+    <string name="err_prompt_too_long">提示词最多 %1$d 字</string>
+    <string name="queue_full">队列已满，完成一个后可继续</string>
+    <string name="bot_missing">未找到可 @ 的画师</string>
+    <string name="seconds">%1$d 秒</string>
+    <string name="minutes">%1$d 分钟</string>
+    <string name="days">%1$d 天</string>
+    <string name="clear_history_confirm">清空全部历史记录？</string>
+</resources>

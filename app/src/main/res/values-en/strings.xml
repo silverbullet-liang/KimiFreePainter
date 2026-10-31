@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FreePainter</string>
+    <string name="tab_paint">Create</string>
+    <string name="tab_history">History</string>
+    <string name="tab_settings">Settings</string>
+
+    <string name="paint_title">New artwork</string>
+    <string name="paint_hint">Describe the image you want</string>
+    <string name="paint_counter">%1$d / %2$d</string>
+    <string name="paint_submit">Start</string>
+    <string name="paint_clear">Clear</string>
+    <string name="paint_empty_title">Nothing yet</string>
+    <string name="paint_empty_desc">Type a prompt and the painter will start</string>
+    <string name="paint_recent">Recent</string>
+
+    <string name="state_queued">Queued</string>
+    <string name="state_posting">Submitting</string>
+    <string name="state_generating">Creating</string>
+    <string name="state_downloading">Fetching artwork</string>
+    <string name="state_cleaning">Cleaning up</string>
+    <string name="state_done">Done</string>
+    <string name="state_failed">Failed</string>
+    <string name="state_cancelled">Cancelled</string>
+    <string name="state_wait">%1$d s elapsed</string>
+
+    <string name="action_cancel">Cancel</string>
+    <string name="action_retry">Retry</string>
+    <string name="action_save">Save image</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_close">Close</string>
+    <string name="action_redelete">Delete again</string>
+    <string name="action_confirm">OK</string>
+
+    <string name="save_success">Saved to gallery</string>
+    <string name="save_failed">Save failed. Check free space.</string>
+
+    <string name="history_empty_title">Nothing yet</string>
+    <string name="history_empty_desc">Finished artwork shows up here</string>
+    <string name="history_delete_confirm">Delete this record?</string>
+    <string name="history_delete_desc">Local record and images are removed. The community post is untouched.</string>
+    <string name="history_detail">Artwork</string>
+    <string name="history_prompt">Prompt</string>
+    <string name="history_caption">Caption</string>
+
+    <string name="settings_account">Account</string>
+    <string name="settings_sign_in">Sign in</string>
+    <string name="settings_sign_out">Sign out</string>
+    <string name="settings_token_valid">Session valid</string>
+    <string name="settings_token_invalid">Session expired</string>
+    <string name="settings_refresh_days">%1$d days left</string>
+    <string name="settings_refresh_unknown">Refresh token expiry unknown</string>
+    <string name="settings_create">Creation</string>
+    <string name="settings_clean_mode">Cleanup</string>
+    <string name="settings_clean_none">Keep everything</string>
+    <string name="settings_clean_trigger">Trigger post only</string>
+    <string name="settings_clean_all">Both posts</string>
+    <string name="settings_clean_delay">Cleanup delay</string>
+    <string name="settings_poll">Poll interval</string>
+    <string name="settings_timeout">Task timeout</string>
+    <string name="settings_bot">Painter</string>
+    <string name="settings_bot_unknown">Detected on first run</string>
+    <string name="settings_history">History</string>
+    <string name="settings_auto_clean">Auto-clean</string>
+    <string name="settings_clear_history">Clear history</string>
+    <string name="settings_about">About</string>
+    <string name="settings_version">Version</string>
+    <string name="settings_license">License</string>
+    <string name="settings_privacy">Privacy</string>
+    <string name="settings_disclaimer">Disclaimer</string>
+
+    <string name="login_title">Sign in</string>
+    <string name="login_desc">Complete sign-in below. Your session is saved automatically.</string>
+    <string name="login_save">Signed in, save</string>
+    <string name="login_checking">Checking session</string>
+    <string name="login_found">Session detected</string>
+    <string name="login_not_found">No session yet. Please finish signing in first.</string>
+
+    <string name="err_network">Network unavailable, task paused</string>
+    <string name="err_need_login">Please sign in first</string>
+    <string name="err_rate_limited">Too many requests. Continuing in %1$d s</string>
+    <string name="err_service">Service unavailable. Try again later.</string>
+    <string name="err_generic">Something went wrong. Try again.</string>
+    <string name="err_prompt_empty">Prompt can\'t be empty</string>
+    <string name="err_prompt_too_long">Prompt is limited to %1$d characters</string>
+    <string name="queue_full">Queue is full. Finish one to continue.</string>
+    <string name="bot_missing">No mentionable painter found</string>
+    <string name="seconds">%1$d s</string>
+    <string name="minutes">%1$d min</string>
+    <string name="days">%1$d d</string>
+    <string name="clear_history_confirm">Clear all history?</string>
+</resources>
