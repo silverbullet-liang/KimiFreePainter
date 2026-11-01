@@ -60,7 +60,7 @@ import kotlinx.coroutines.launch
 import org.json.JSONArray
 import java.io.File
 
-private const val MAX_PROMPT = 500
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -110,16 +110,15 @@ fun PaintScreen(
             item {
                 OutlinedTextField(
                     value = prompt,
-                    onValueChange = { if (it.length <= MAX_PROMPT) prompt = it },
+                    onValueChange = { prompt = it },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 4,
                     maxLines = 8,
                     placeholder = { Text(stringResource(R.string.paint_hint)) },
                     supportingText = {
                         Text(
-                            stringResource(R.string.paint_counter, prompt.length, MAX_PROMPT),
-                            color = if (prompt.length >= MAX_PROMPT) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.onSurfaceVariant
+                            stringResource(R.string.paint_counter, prompt.length),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     },
                     shape = RoundedCornerShape(14.dp)
@@ -281,14 +280,17 @@ private fun ResultCard(task: PainterTask, onOpen: () -> Unit, onSave: () -> Unit
                 )
             }
             Column(Modifier.padding(14.dp)) {
-                Text(
-                    task.prompt,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
+                if (!task.title.isNullOrEmpty()) {
+                    Text(
+                        task.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(Modifier.height(4.dp))
+                }
                 if (!task.description.isNullOrEmpty()) {
-                    Spacer(Modifier.height(6.dp))
                     Text(
                         task.description,
                         style = MaterialTheme.typography.bodySmall,
@@ -296,7 +298,15 @@ private fun ResultCard(task: PainterTask, onOpen: () -> Unit, onSave: () -> Unit
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
+                    Spacer(Modifier.height(6.dp))
                 }
+                Text(
+                    stringResource(R.string.history_prompt) + task.prompt,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(onClick = onSave) { Text(stringResource(R.string.action_save)) }

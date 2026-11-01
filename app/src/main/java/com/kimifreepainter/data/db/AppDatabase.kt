@@ -11,6 +11,8 @@ import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Update
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "painter_task")
@@ -22,6 +24,7 @@ data class PainterTask(
     val botName: String = "",
     val triggerMomentId: String? = null,
     val resultMomentId: String? = null,
+    val title: String? = null,
     val description: String? = null,
     val imageUrls: String = "[]",
     val localPaths: String? = null,
@@ -92,7 +95,7 @@ interface MomentDao {
     suspend fun setWatermark(w: Watermark)
 }
 
-@Database(entities = [PainterTask::class, SeenMoment::class, Watermark::class], version = 1, exportSchema = false)
+@Database(entities = [PainterTask::class, SeenMoment::class, Watermark::class], version = 2, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun tasks(): TaskDao
     abstract fun moments(): MomentDao
@@ -100,8 +103,16 @@ abstract class AppDatabase : RoomDatabase() {
     companion object {
         @Volatile private var inst: AppDatabase? = null
 
+        /** v2 只多了 title 列，普通迁移即可，不重建库、不丢历史。 */
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE painter_task ADD COLUMN title TEXT")
+            }
+        }
+
         fun get(context: Context): AppDatabase = inst ?: synchronized(this) {
             inst ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "kimpainter.db")
+                .addMigrations(MIGRATION_1_2)
                 .build().also { inst = it }
         }
     }

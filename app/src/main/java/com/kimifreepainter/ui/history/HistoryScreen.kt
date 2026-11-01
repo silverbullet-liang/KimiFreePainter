@@ -204,16 +204,20 @@ fun TaskDetailDialog(task: PainterTask, engine: PaintEngine, onDismiss: () -> Un
                             contentScale = ContentScale.Fit
                         )
                     }
-                    Spacer(Modifier.height(14.dp))
-                    Text(stringResource(R.string.history_prompt), style = MaterialTheme.typography.labelMedium)
-                    Spacer(Modifier.height(4.dp))
-                    Text(task.prompt, style = MaterialTheme.typography.bodyMedium)
+                    if (!task.title.isNullOrEmpty()) {
+                        Spacer(Modifier.height(14.dp))
+                        Text(task.title, style = MaterialTheme.typography.titleMedium)
+                    }
                     if (!task.description.isNullOrEmpty()) {
                         Spacer(Modifier.height(14.dp))
                         Text(stringResource(R.string.history_caption), style = MaterialTheme.typography.labelMedium)
                         Spacer(Modifier.height(4.dp))
                         Text(task.description, style = MaterialTheme.typography.bodyMedium)
                     }
+                    Spacer(Modifier.height(14.dp))
+                    Text(stringResource(R.string.history_prompt), style = MaterialTheme.typography.labelMedium)
+                    Spacer(Modifier.height(4.dp))
+                    Text(task.prompt, style = MaterialTheme.typography.bodyMedium)
                     if (!task.errorMsg.isNullOrEmpty()) {
                         Spacer(Modifier.height(14.dp))
                         Text(task.errorMsg, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)

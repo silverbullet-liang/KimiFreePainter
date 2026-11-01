@@ -17,16 +17,29 @@ object KimiApi {
 
     data class Moment(
         val id: String,
+        val title: String,
         val text: String,
         val source: String,
         val createTime: Long,
         val authorId: String,
         val authorType: String,
+        /** 引用关系：成品帖会指向触发帖，是最可靠的配对判据 */
+        val refMomentId: String,
         val images: List<Image>,
         val deleted: Boolean
     )
 
-    data class Comment(val id: String, val type: String, val aiGenerated: Boolean, val text: String)
+    /**
+     * links 是机器人回复里「查看作品」那条超链接的真实地址。
+     * 正文只存显示文本，URL 只在这里，从 text 里正则永远抓不到。
+     */
+    data class Comment(
+        val id: String,
+        val type: String,
+        val aiGenerated: Boolean,
+        val text: String,
+        val links: List<String>
+    )
 
     private fun arr(o: JSONObject?, key: String): JSONArray = o?.optJSONArray(key) ?: JSONArray()
 
@@ -53,25 +66,38 @@ object KimiApi {
         return out
     }
 
-    /** 发触发帖。@ 通过 mentions 表达，不写进正文。 */
+    /**
+     * 发触发帖。
+     * 平台是按正文里的 @ 文本定位目标的：只发 mentions 字段不会让动态出现 @，
+     * 机器人也就收不到。两者一起给，正文里的 @ 才是真正生效的那个。
+     */
     suspend fun createMoment(
         text: String,
         mentionUserId: String,
         mentionName: String,
         publicVisible: Boolean = true
     ): String {
+        val mention = "@$mentionName"
+        val withMention = if (mentionName.isNotEmpty() && !text.contains(mention)) {
+            "$mention $text"
+        } else {
+            text
+        }
         val body = JSONObject()
-            .put("text", text)
+            .put("text", withMention)
             .put(
                 "visibility",
                 if (publicVisible) "MOMENT_VISIBILITY_PUBLIC" else "MOMENT_VISIBILITY_SELF"
             )
-            .put(
+        // 拿不到机器人 userId 时只发正文 @：多一个空 id 反而可能被判参数非法
+        if (mentionUserId.isNotEmpty()) {
+            body.put(
                 "mentions",
                 JSONArray().put(
                     JSONObject().put("userId", mentionUserId).put("name", mentionName)
                 )
             )
+        }
         val r = ApiClient.post("/moment.v1.MomentService/CreateMoment", body)
         return r.optJSONObject("moment")?.optString("id").orEmpty()
     }
@@ -116,11 +142,28 @@ object KimiApi {
         val cs = arr(r, "comments")
         for (i in 0 until cs.length()) {
             val c = cs.optJSONObject(i) ?: continue
+            val content = c.optJSONObject("content")
+            val links = mutableListOf<String>()
+            for (key in arrayOf("links", "linkList")) {
+                val la = content?.optJSONArray(key) ?: c.optJSONArray(key) ?: continue
+                for (j in 0 until la.length()) {
+                    val v = la.opt(j)
+                    val u = when (v) {
+                        is String -> v
+                        is JSONObject -> v.optString("url").ifEmpty {
+                            v.optString("linkUrl").ifEmpty { v.optString("href") }
+                        }
+                        else -> ""
+                    }
+                    if (u.isNotEmpty()) links += u
+                }
+            }
             out += Comment(
                 id = c.optString("id"),
                 type = c.optString("type"),
                 aiGenerated = c.optBoolean("aiGenerated", false),
-                text = c.optJSONObject("content")?.optString("text").orEmpty()
+                text = content?.optString("text").orEmpty(),
+                links = links
             )
         }
         return out
@@ -159,8 +202,12 @@ object KimiApi {
         }
         return Moment(
             id = m.optString("id"),
+            title = content?.optString("title").orEmpty(),
             text = content?.optString("text").orEmpty(),
             source = content?.optString("source").orEmpty(),
+            refMomentId = m.optString("refMomentId").ifEmpty {
+                content?.optString("refMomentId").orEmpty()
+            },
             createTime = ts(m.optString("createTime")),
             authorId = author?.optString("userId").orEmpty(),
             authorType = author?.optString("type").orEmpty(),

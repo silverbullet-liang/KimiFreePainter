@@ -12,6 +12,7 @@ import com.kimifreepainter.data.settings.CleanMode
 import com.kimifreepainter.data.settings.Settings
 import com.kimifreepainter.data.settings.SettingsRepository
 import com.kimifreepainter.util.ImageSaver
+import com.kimifreepainter.util.TextUtil
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -158,7 +159,8 @@ class PaintEngine(context: Context) {
                 it.copy(
                     status = TaskStatus.DOWNLOADING.name,
                     resultMomentId = moment.id,
-                    description = moment.text
+                    title = moment.title.ifEmpty { null },
+                    description = TextUtil.extractIntro(moment.text, task.prompt).ifEmpty { null }
                 )
             }
 
@@ -248,7 +250,7 @@ class PaintEngine(context: Context) {
         var strikes = 0
         while (System.currentTimeMillis() < deadline) {
             delay(interval)
-            val hit = runCatching { MomentProbe.scan(watermark, ownerId, seen) }.getOrNull()
+            val hit = runCatching { MomentProbe.scan(triggerId, watermark, ownerId, seen) }.getOrNull()
             if (hit != null) return hit
             // 中途被取消
             val cur = db.tasks().byId(taskId) ?: return null

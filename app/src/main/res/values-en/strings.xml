@@ -7,7 +7,7 @@
 
     <string name="paint_title">New artwork</string>
     <string name="paint_hint">Describe the image you want</string>
-    <string name="paint_counter">%1$d / %2$d</string>
+    <string name="paint_counter">%1$d chars</string>
     <string name="paint_submit">Start</string>
     <string name="paint_clear">Clear</string>
     <string name="paint_empty_title">Nothing yet</string>
