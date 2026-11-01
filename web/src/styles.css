@@ -151,3 +151,17 @@ button.wide { width: 100%; }
   color: #d03050; font-size: 14px;
 }
 .card.err strong { font-weight: 600; }
+
+.card.warn {
+  display: flex; flex-direction: column; gap: 4px;
+  border-color: #d89614; background: rgba(216, 150, 20, .08);
+  color: #b97908; font-size: 14px;
+}
+.card.warn strong { font-weight: 600; }
+
+.card.running { display: flex; align-items: center; gap: 10px; }
+.card.running span:nth-of-type(2) { flex: 1; }
+button.ghost.small { padding: 6px 12px; border-radius: 10px; font-size: 13px; }
+
+.hint.ver { cursor: default; user-select: none; }
+.hint.ver:hover { color: var(--accent); }

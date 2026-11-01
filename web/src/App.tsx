@@ -19,10 +19,13 @@ import {
   pickResult,
   saveTokens,
   uploadImage,
-  type Moment
+  type Moment,
+  type UploadedImage
 } from './api/kimi'
 import QrLogin from './QrLogin'
 import { refreshTokens } from './api/auth'
+
+declare const __APP_VERSION__: string
 
 type Status = 'idle' | 'posting' | 'waiting' | 'done' | 'failed'
 type Tab = 'paint' | 'history' | 'settings'
@@ -61,6 +64,9 @@ export default function App() {
   const [status, setStatus] = useState<Status>('idle')
   const [waited, setWaited] = useState(0)
   const [error, setError] = useState('')
+  const [warn, setWarn] = useState('')
+  const [upd, setUpd] = useState('')
+  const [updLinks, setUpdLinks] = useState('')
   const [result, setResult] = useState<Record | null>(null)
   const [history, setHistory] = useState<Record[]>(loadHistory)
   const [tokens, setTokens] = useState(() => loadTokens())
@@ -71,6 +77,7 @@ export default function App() {
   const [pick, setPick] = useState<File | null>(null)
   const [pickUrl, setPickUrl] = useState('')
   const timer = useRef<number | null>(null)
+  const stopRef = useRef(false)
 
   // 登录态实时维护：access 到期自动用刷新态换新，换不动就判定掉线
   useEffect(() => {
@@ -114,6 +121,35 @@ export default function App() {
     localStorage.setItem(HIST, JSON.stringify(history.slice(0, 40)))
   }, [history])
 
+  /** 双击版本号：比对 GitHub 最新 Release。网页版刷新即更新，APK 另给下载地址。 */
+  async function checkUpdate() {
+    setUpd('检查中…')
+    setUpdLinks('')
+    try {
+      const r = await fetch(
+        'https://api.github.com/repos/silverbullet-liang/KimiFreePainter/releases/latest',
+        { headers: { Accept: 'application/vnd.github+json' } }
+      )
+      const j = (await r.json()) as { tag_name?: string; html_url?: string }
+      const remote = String(j.tag_name || '').replace(/^v/, '')
+      if (!remote) throw new Error('no tag')
+      const newer = remote.localeCompare(__APP_VERSION__, undefined, { numeric: true }) > 0
+      if (newer) {
+        setUpd(`发现 ${remote}，正在刷新`)
+        setUpdLinks(
+          `https://github.com/silverbullet-liang/KimiFreePainter/releases/download/v${remote}/KimiFreePainter-v${remote}.apk`
+        )
+        window.setTimeout(() => window.location.reload(), 1200)
+      } else {
+        setUpd('已是最新版本')
+        window.setTimeout(() => setUpd(''), 2500)
+      }
+    } catch {
+      setUpd('检查失败，请稍后再试')
+      window.setTimeout(() => setUpd(''), 2500)
+    }
+  }
+
   async function start() {
     const text = prompt.trim()
     if (!text || status === 'posting' || status === 'waiting') return
@@ -123,7 +159,9 @@ export default function App() {
       return
     }
     setError('')
+    setWarn('')
     setResult(null)
+    stopRef.current = false
     setWaited(0)
     setStatus('posting')
     try {
@@ -141,9 +179,26 @@ export default function App() {
       history.forEach((h) => knownIds.add(h.id))
       const watermark = before.reduce((m, x) => Math.max(m, x.createTime), 0)
 
-      // 带图即改图：一条动态只吃一张，平台侧限制
-      const imageId = pick ? await uploadImage(pick) : ''
-      const triggerId = await createMoment(text, botId, AI_BOT, imageId)
+      // 带图即改图：一条动态只吃一张，平台侧限制。
+      // 上传失败不阻塞：降级为纯文字发出，把原因写在界面上，而不是让按钮点了没反应。
+      let image: UploadedImage | null = null
+      if (pick) {
+        try {
+          image = await uploadImage(pick)
+        } catch (e) {
+          setWarn(`图片没能上传：${(e as Error).message}。本次按纯文字发出。`)
+        }
+      }
+
+      let triggerId = ''
+      try {
+        triggerId = await createMoment(text, botId, AI_BOT, image)
+      } catch (e) {
+        if (!image) throw e
+        setWarn(`带图发帖被拒（${(e as Error).message}），已按纯文字重试。`)
+        image = null
+        triggerId = await createMoment(text, botId, AI_BOT, null)
+      }
       if (!triggerId) throw new Error('发帖没有返回动态 ID')
 
       // 回查确认：接口给了 id 不代表动态真的存在（可能被风控吞掉）。
@@ -159,6 +214,9 @@ export default function App() {
       if (self.text && !self.text.includes('@')) {
         throw new Error('动态发出去了，但正文里的 @ 没生效，画师收不到，请重试')
       }
+      if (image && self.images.length === 0) {
+        setWarn('图片没有随动态发出，本次按纯文字生成。')
+      }
 
       knownIds.add(triggerId)
       setStatus('waiting')
@@ -169,6 +227,7 @@ export default function App() {
       let diag = ''
       while (Date.now() < deadline) {
         await sleep(Math.max(8, poll) * 1000)
+        if (stopRef.current) throw new Error('已停止等待（触发帖不会被删除）')
         rounds++
         const feeds = await listMyFeeds(20)
         // 诊断日志：出问题时在控制台能看到每轮抓到了什么
@@ -347,6 +406,14 @@ export default function App() {
               <div className="card running">
                 <span className="pulse" />
                 <span>{status === 'posting' ? '正在提交…' : `画师正在创作… 已等待 ${waited} 秒`}</span>
+                <button className="ghost small" onClick={() => { stopRef.current = true }}>停止</button>
+              </div>
+            )}
+
+            {warn && (
+              <div className="card warn">
+                <strong>提示</strong>
+                <span>{warn}</span>
               </div>
             )}
 
@@ -513,7 +580,16 @@ export default function App() {
 
             <section>
               <h2>关于</h2>
-              <p className="hint">版本 1.0.0 · GPL-3.0</p>
+              <p className="hint ver" onDoubleClick={checkUpdate} title="双击检查更新">
+                版本 {__APP_VERSION__}
+                {upd ? ` · ${upd}` : ''} · GPL-3.0
+              </p>
+              {updLinks && (
+                <p className="hint">
+                  新版 APK：
+                  <a href={updLinks} target="_blank" rel="noreferrer">{updLinks.split('/').pop()}</a>
+                </p>
+              )}
               <p className="hint">本页不含任何第三方分析或追踪脚本；图片与历史仅保存在浏览器本地。</p>
               <p className="hint">使用平台非公开接口，非官方产品，与平台方无关联。接口变更可能导致不可用。</p>
             </section>

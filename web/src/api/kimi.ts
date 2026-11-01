@@ -229,7 +229,7 @@ export async function createMoment(
   prompt: string,
   botId: string,
   botName: string,
-  imageId?: string
+  image?: UploadedImage | null
 ): Promise<string> {
   const mention = `@${botName}`
   // 平台靠正文里的 @ 文本定位目标：只发 mentions 字段不会在动态里出现 @，
@@ -242,7 +242,14 @@ export async function createMoment(
   // 拿不到机器人 userId 时只发正文 @：多一个空 id 反而可能被判参数非法
   if (botId) body.mentions = [{ userId: botId, name: botName }]
   // 带图即改图：图片随动态发出，画师以它为底图重绘。平台一条动态只吃一张。
-  if (imageId) body.images = [{ fileId: imageId }]
+  // images 的元素是 ImageInfo，带上 originUrl/thumbnailUrl/extra 才算完整对象。
+  if (image) {
+    const info: { [k: string]: unknown } = { fileId: image.fileId }
+    if (image.originUrl) info.originUrl = image.originUrl
+    if (image.thumbnailUrl) info.thumbnailUrl = image.thumbnailUrl
+    if (image.width && image.height) info.extra = { width: image.width, height: image.height }
+    body.images = [info]
+  }
   const r = await call<{ moment?: { id?: string } }>('/moment.v1.MomentService/CreateMoment', body)
   return r.moment?.id ?? ''
 }
@@ -264,31 +271,62 @@ function imageSize(file: File): Promise<{ width: number; height: number }> {
   })
 }
 
+/** 上传完成后的文件描述，字段与 proto 的 ImageInfo 对齐。 */
+export type UploadedImage = {
+  fileId: string
+  originUrl: string
+  thumbnailUrl: string
+  width: number
+  height: number
+}
+
 /**
- * 图片三步上传：申请预签名地址 → PUT 直传云存储 → 登记文件拿 fileId。
- * fileId 才是发帖时 images 字段要的东西，直传后的地址本身不参与发帖。
+ * 图片三步上传：GeneratePresignedURL 拿直传地址 → PUT 上传 → CreateFile 登记。
+ *
+ * 两个易错点：
+ * 1. 预签名 URL 若把 Content-Type 纳入签名，带了不匹配的头就会 403。
+ *    所以先不带头上传，失败再带 image/* 重试一次。
+ * 2. 发帖要的是 CreateFile 返回的 fileId，不是预签名那一次给的。
  */
-export async function uploadImage(file: File): Promise<string> {
+export async function uploadImage(file: File): Promise<UploadedImage> {
   const pre = await call<{ uploadUrl?: string; fileId?: string }>(
     '/moment.v1.UploadService/GeneratePresignedURL',
     { fileType: 'FILE_TYPE_IMAGE' }
   )
   if (!pre.uploadUrl || !pre.fileId) throw new Error('未获取到上传地址')
 
-  const put = await fetch(pre.uploadUrl, {
-    method: 'PUT',
-    body: file,
-    headers: { 'Content-Type': file.type || 'application/octet-stream' }
-  })
-  if (!put.ok) throw new Error(`图片直传失败（HTTP ${put.status}）`)
+  const put = async (withType: boolean) => {
+    const body = withType ? file : new Blob([file])
+    const res = await fetch(pre.uploadUrl!, {
+      method: 'PUT',
+      body,
+      headers: withType ? { 'Content-Type': file.type || 'application/octet-stream' } : {}
+    })
+    return res.ok
+  }
+
+  let ok = await put(false)
+  if (!ok) ok = await put(true)
+  if (!ok) throw new Error('图片上传被云存储拒绝（预览地址不可直传）')
 
   const size = await imageSize(file)
-  const made = await call<{ fileId?: string }>('/moment.v1.UploadService/CreateFile', {
+  const made = await call<{
+    fileId?: string
+    originUrl?: string
+    thumbnailUrl?: string
+  }>('/moment.v1.UploadService/CreateFile', {
     fileName: file.name || 'image.png',
     fileId: pre.fileId,
-    extra: size
+    extra: { width: size.width, height: size.height }
   })
-  return made.fileId || pre.fileId
+
+  return {
+    fileId: made.fileId || pre.fileId,
+    originUrl: made.originUrl || '',
+    thumbnailUrl: made.thumbnailUrl || '',
+    width: size.width,
+    height: size.height
+  }
 }
 
 export async function deleteMoment(momentId: string): Promise<void> {
