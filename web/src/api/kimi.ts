@@ -221,7 +221,8 @@ export async function listBots(): Promise<Bot[]> {
 export async function createMoment(
   prompt: string,
   botId: string,
-  botName: string
+  botName: string,
+  imageId?: string
 ): Promise<string> {
   const mention = `@${botName}`
   // 平台靠正文里的 @ 文本定位目标：只发 mentions 字段不会在动态里出现 @，
@@ -233,8 +234,54 @@ export async function createMoment(
   }
   // 拿不到机器人 userId 时只发正文 @：多一个空 id 反而可能被判参数非法
   if (botId) body.mentions = [{ userId: botId, name: botName }]
+  // 带图即改图：图片随动态发出，画师以它为底图重绘。平台一条动态只吃一张。
+  if (imageId) body.images = [{ fileId: imageId }]
   const r = await call<{ moment?: { id?: string } }>('/moment.v1.MomentService/CreateMoment', body)
   return r.moment?.id ?? ''
+}
+
+/** 读本地图片尺寸，登记文件时一并上报。 */
+function imageSize(file: File): Promise<{ width: number; height: number }> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      resolve({ width: img.naturalWidth || 0, height: img.naturalHeight || 0 })
+      URL.revokeObjectURL(url)
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      resolve({ width: 0, height: 0 })
+    }
+    img.src = url
+  })
+}
+
+/**
+ * 图片三步上传：申请预签名地址 → PUT 直传云存储 → 登记文件拿 fileId。
+ * fileId 才是发帖时 images 字段要的东西，直传后的地址本身不参与发帖。
+ */
+export async function uploadImage(file: File): Promise<string> {
+  const pre = await call<{ uploadUrl?: string; fileId?: string }>(
+    '/moment.v1.UploadService/GeneratePresignedURL',
+    { fileType: 'FILE_TYPE_IMAGE' }
+  )
+  if (!pre.uploadUrl || !pre.fileId) throw new Error('未获取到上传地址')
+
+  const put = await fetch(pre.uploadUrl, {
+    method: 'PUT',
+    body: file,
+    headers: { 'Content-Type': file.type || 'application/octet-stream' }
+  })
+  if (!put.ok) throw new Error(`图片直传失败（HTTP ${put.status}）`)
+
+  const size = await imageSize(file)
+  const made = await call<{ fileId?: string }>('/moment.v1.UploadService/CreateFile', {
+    fileName: file.name || 'image.png',
+    fileId: pre.fileId,
+    extra: size
+  })
+  return made.fileId || pre.fileId
 }
 
 export async function deleteMoment(momentId: string): Promise<void> {

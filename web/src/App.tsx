@@ -17,6 +17,7 @@ import {
   pickNewArtifact,
   pickResult,
   saveTokens,
+  uploadImage,
   type Moment
 } from './api/kimi'
 import QrLogin from './QrLogin'
@@ -64,6 +65,8 @@ export default function App() {
   const [clean, setClean] = useState(() => localStorage.getItem('kfp_clean') || 'trigger')
   const [poll, setPoll] = useState(() => Number(localStorage.getItem('kfp_poll') || 10))
   const [openId, setOpenId] = useState<string | null>(null)
+  const [pick, setPick] = useState<File | null>(null)
+  const [pickUrl, setPickUrl] = useState('')
   const timer = useRef<number | null>(null)
 
   const logged = hasTokens()
@@ -111,7 +114,9 @@ export default function App() {
       history.forEach((h) => knownIds.add(h.id))
       const watermark = before.reduce((m, x) => Math.max(m, x.createTime), 0)
 
-      const triggerId = await createMoment(text, botId, AI_BOT)
+      // 带图即改图：一条动态只吃一张，平台侧限制
+      const imageId = pick ? await uploadImage(pick) : ''
+      const triggerId = await createMoment(text, botId, AI_BOT, imageId)
       if (!triggerId) throw new Error('发帖未返回动态 ID，请稍后重试')
       knownIds.add(triggerId)
       setStatus('waiting')
@@ -201,6 +206,8 @@ export default function App() {
       setHistory((h) => [record, ...h.filter((x) => x.id !== record.id)].slice(0, 40))
       setStatus('done')
       setPrompt('')
+      setPick(null)
+      setPickUrl('')
 
       // 清理：立即执行，结果写回本条记录，界面能看到成功与否
       if (clean !== 'none') {
@@ -255,6 +262,41 @@ export default function App() {
                 rows={5}
               />
               <div className="counter">{prompt.length} 字</div>
+            </div>
+
+            <div className="picker">
+              <label className="pick-btn">
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null
+                    e.target.value = ''
+                    if (!f) return
+                    if (pickUrl) URL.revokeObjectURL(pickUrl)
+                    setPick(f)
+                    setPickUrl(URL.createObjectURL(f))
+                  }}
+                />
+                <ImageIcon />
+                添加图片（改图）
+              </label>
+              {pickUrl && (
+                <div className="pick-prev">
+                  <img src={pickUrl} alt="" draggable={false} />
+                  <button
+                    className="icon"
+                    aria-label="移除图片"
+                    onClick={() => {
+                      URL.revokeObjectURL(pickUrl)
+                      setPick(null)
+                      setPickUrl('')
+                    }}
+                  >
+                    <Trash />
+                  </button>
+                </div>
+              )}
             </div>
 
             <button className="primary" onClick={start} disabled={!prompt.trim() || status === 'posting' || status === 'waiting'}>
@@ -547,6 +589,16 @@ function Gear() {
     </svg>
   )
 }
+function ImageIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+      <rect x="3.5" y="5" width="17" height="14" rx="3" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <circle cx="9" cy="10" r="1.6" fill="currentColor" />
+      <path d="M5 17l4.5-4.5 3.5 3 3-2.5L20 17" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
 function Trash() {
   return (
     <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
