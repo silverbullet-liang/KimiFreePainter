@@ -15,6 +15,7 @@
     <string name="paint_clear">Clear</string>
     <string name="paint_empty_title">Nothing yet</string>
     <string name="paint_empty_desc">Type a prompt and the painter will start</string>
+    <string name="paint_failed_section">Not finished</string>
     <string name="paint_recent">Recent</string>
 
     <string name="state_queued">Queued</string>
@@ -67,6 +68,13 @@
     <string name="settings_auto_clean">Auto-clean</string>
     <string name="settings_clear_history">Clear history</string>
     <string name="settings_about">About</string>
+    <string name="update_checking">Checking for updates…</string>
+    <string name="update_failed">Check failed, try later</string>
+    <string name="update_latest">Already up to date</string>
+    <string name="update_downloading">Downloading %1$d%%</string>
+    <string name="update_download_failed">Download failed</string>
+    <string name="update_installing">Starting installer…</string>
+    <string name="update_install_failed">Cannot start installer, check install permission</string>
     <string name="settings_version">Version</string>
     <string name="settings_license">License</string>
     <string name="settings_privacy">Privacy</string>

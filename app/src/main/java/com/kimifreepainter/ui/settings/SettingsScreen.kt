@@ -1,6 +1,8 @@
 package com.kimifreepainter.ui.settings
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -30,6 +32,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -38,7 +41,11 @@ import com.kimifreepainter.data.auth.AuthManager
 import com.kimifreepainter.data.settings.CleanMode
 import com.kimifreepainter.data.settings.Settings
 import com.kimifreepainter.data.settings.SettingsRepository
+import com.kimifreepainter.data.update.Updater
+import android.content.Context
+import java.io.File
 import androidx.compose.runtime.collectAsState
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -64,6 +71,16 @@ fun SettingsScreen(
     var showTimeout by remember { mutableStateOf(false) }
     var showClear by remember { mutableStateOf(false) }
     var showAbout by remember { mutableStateOf<String?>(null) }
+    val ctx = LocalContext.current
+    val appVersion = remember {
+        runCatching {
+            val pi = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
+            val code = if (android.os.Build.VERSION.SDK_INT >= 28) pi.longVersionCode else @Suppress("DEPRECATION") pi.versionCode.toLong()
+            "${pi.versionName} (${code})"
+        }.getOrNull() ?: "?"
+    }
+    var updateText by remember { mutableStateOf("") }
+    var updating by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize()) {
         TopAppBar(title = { Text(stringResource(R.string.tab_settings)) })
@@ -145,7 +162,57 @@ fun SettingsScreen(
 
             Divider()
             Section(stringResource(R.string.settings_about))
-            ItemRow(stringResource(R.string.settings_version), "1.0.0") { }
+            ItemRow(
+                title = stringResource(R.string.settings_version),
+                value = if (updating) updateText else appVersion,
+                onClick = {},
+                onDoubleClick = {
+                    if (updating) return@ItemRow
+                    updating = true
+                    updateText = ctx.getString(R.string.update_checking)
+                    scope.launch {
+                        val info = Updater.latest()
+                        if (info == null) {
+                            updateText = ctx.getString(R.string.update_failed)
+                            delay(2500)
+                            updateText = ""
+                            updating = false
+                            return@launch
+                        }
+                        val cur = runCatching {
+                            val pi = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
+                            if (android.os.Build.VERSION.SDK_INT >= 28) pi.longVersionCode.toInt()
+                            else @Suppress("DEPRECATION") pi.versionCode
+                        }.getOrDefault(0)
+                        if (info.versionCode <= cur) {
+                            updateText = ctx.getString(R.string.update_latest)
+                            delay(2500)
+                            updateText = ""
+                            updating = false
+                            return@launch
+                        }
+                        updateText = ctx.getString(R.string.update_downloading, 0)
+                        val main = android.os.Handler(android.os.Looper.getMainLooper())
+                        val apk = Updater.download(info.apkUrl, File(ctx.cacheDir, "update.apk")) { p ->
+                            main.post { updateText = ctx.getString(R.string.update_downloading, p) }
+                        }
+                        if (apk == null) {
+                            updateText = ctx.getString(R.string.update_download_failed)
+                            delay(3000)
+                            updateText = ""
+                            updating = false
+                            return@launch
+                        }
+                        updateText = ctx.getString(R.string.update_installing)
+                        if (!Updater.install(ctx, apk)) {
+                            updateText = ctx.getString(R.string.update_install_failed)
+                            delay(3000)
+                            updateText = ""
+                        }
+                        updating = false
+                    }
+                }
+            )
             ItemRow(stringResource(R.string.settings_license), "GPL-3.0") { showAbout = "license" }
             ItemRow(stringResource(R.string.settings_privacy), "") { showAbout = "privacy" }
             ItemRow(stringResource(R.string.settings_disclaimer), "") { showAbout = "disclaimer" }
@@ -237,10 +304,18 @@ private fun Divider() = HorizontalDivider(
     color = MaterialTheme.colorScheme.surfaceVariant
 )
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ItemRow(title: String, value: String, onClick: () -> Unit) {
+private fun ItemRow(
+    title: String,
+    value: String,
+    onDoubleClick: (() -> Unit)? = null,
+    onClick: () -> Unit
+) {
     Row(
-        Modifier.fillMaxWidth().clickable { onClick() }.padding(horizontal = 16.dp, vertical = 14.dp),
+        Modifier.fillMaxWidth()
+            .combinedClickable(onClick = onClick, onDoubleClick = onDoubleClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(title, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)

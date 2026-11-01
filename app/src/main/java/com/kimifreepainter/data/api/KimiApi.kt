@@ -31,6 +31,15 @@ object KimiApi {
         val deleted: Boolean
     )
 
+    /** 上传结果，字段与 proto 的 ImageInfo 对齐。 */
+    data class UploadedImage(
+        val fileId: String,
+        val originUrl: String,
+        val thumbnailUrl: String,
+        val width: Int,
+        val height: Int
+    )
+
     /**
      * links 是机器人回复里「查看作品」那条超链接的真实地址。
      * 正文只存显示文本，URL 只在这里，从 text 里正则永远抓不到。
@@ -78,7 +87,7 @@ object KimiApi {
         mentionUserId: String,
         mentionName: String,
         publicVisible: Boolean = true,
-        imageId: String = ""
+        image: UploadedImage? = null
     ): String {
         val mention = "@$mentionName"
         val withMention = if (mentionName.isNotEmpty() && !text.contains(mention)) {
@@ -102,16 +111,27 @@ object KimiApi {
             )
         }
         // 带图即改图：图片随动态发出，画师以它为底图重绘。平台一条动态只吃一张。
-        if (imageId.isNotEmpty()) {
-            body.put("images", JSONArray().put(JSONObject().put("fileId", imageId)))
+        // images 的元素是 ImageInfo，只给 fileId 不算完整对象。
+        if (image != null && image.fileId.isNotEmpty()) {
+            val o = JSONObject().put("fileId", image.fileId)
+            if (image.originUrl.isNotEmpty()) o.put("originUrl", image.originUrl)
+            if (image.thumbnailUrl.isNotEmpty()) o.put("thumbnailUrl", image.thumbnailUrl)
+            if (image.width > 0 && image.height > 0) {
+                o.put("extra", JSONObject().put("width", image.width).put("height", image.height))
+            }
+            body.put("images", JSONArray().put(o))
         }
         val r = ApiClient.post("/moment.v1.MomentService/CreateMoment", body)
         return r.optJSONObject("moment")?.optString("id").orEmpty()
     }
 
     /**
-     * 图片三步上传：申请预签名地址 → PUT 直传云存储 → 登记文件。
-     * 发帖时 images 字段要的是登记后的 fileId，直传地址本身不参与发帖。
+     * 图片三步上传：GeneratePresignedURL 拿直传地址 → PUT 上传 → CreateFile 登记。
+     *
+     * 两个易错点：
+     * 1. 预签名 URL 若把 Content-Type 纳入签名，带了不匹配的头会 403，
+     *    所以先不带头上传，失败再带上图片 MIME 重试一次。
+     * 2. 发帖要的是 CreateFile 返回的 fileId，不是预签名那一次给的。
      */
     suspend fun uploadImage(
         bytes: ByteArray,
@@ -119,7 +139,7 @@ object KimiApi {
         contentType: String,
         width: Int,
         height: Int
-    ): String {
+    ): UploadedImage {
         val pre = ApiClient.post(
             "/moment.v1.UploadService/GeneratePresignedURL",
             JSONObject().put("fileType", "FILE_TYPE_IMAGE")
@@ -128,15 +148,9 @@ object KimiApi {
         val preFileId = pre.optString("fileId")
         if (uploadUrl.isEmpty() || preFileId.isEmpty()) throw ApiException(-1, "未获取到上传地址")
 
-        withContext(Dispatchers.IO) {
-            val req = Request.Builder()
-                .url(uploadUrl)
-                .put(bytes.toRequestBody((contentType.ifEmpty { "image/jpeg" }).toMediaType()))
-                .build()
-            ApiClient.http.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) throw ApiException(resp.code, "图片直传失败")
-            }
-        }
+        val ok = putObject(uploadUrl, bytes, null) ||
+            putObject(uploadUrl, bytes, contentType.ifEmpty { "image/jpeg" })
+        if (!ok) throw ApiException(-1, "图片上传被云存储拒绝")
 
         val made = ApiClient.post(
             "/moment.v1.UploadService/CreateFile",
@@ -145,8 +159,24 @@ object KimiApi {
                 .put("fileId", preFileId)
                 .put("extra", JSONObject().put("width", width).put("height", height))
         )
-        return made.optString("fileId").ifEmpty { preFileId }
+        return UploadedImage(
+            fileId = made.optString("fileId").ifEmpty { preFileId },
+            originUrl = made.optString("originUrl"),
+            thumbnailUrl = made.optString("thumbnailUrl"),
+            width = width,
+            height = height
+        )
     }
+
+    /** PUT 到预签名地址。mediaType 传 null 时不带 Content-Type。 */
+    private suspend fun putObject(url: String, bytes: ByteArray, mediaType: String?): Boolean =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val body = bytes.toRequestBody(mediaType?.toMediaType())
+                val req = Request.Builder().url(url).put(body).build()
+                ApiClient.http.newCall(req).execute().use { it.isSuccessful }
+            }.getOrDefault(false)
+        }
 
     suspend fun deleteMoment(momentId: String) {
         ApiClient.post(

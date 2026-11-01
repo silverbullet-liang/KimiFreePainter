@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Brush
+import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -96,8 +97,13 @@ fun PaintScreen(
         }
     }
 
-    val active = tasks.filter { TaskStatus.valueOf(it.status).ordinal < TaskStatus.DONE.ordinal }
+    fun statusOf(t: PainterTask) = runCatching { TaskStatus.valueOf(t.status) }.getOrDefault(TaskStatus.QUEUED)
+    val active = tasks.filter { statusOf(it).ordinal < TaskStatus.DONE.ordinal }
     val finished = tasks.filter { it.status == TaskStatus.DONE.name }.take(6)
+    // 失败与取消必须露出来：之前这两个状态既不进进行中也不进已完成，任务直接消失
+    val failed = tasks.filter {
+        it.status == TaskStatus.FAILED.name || it.status == TaskStatus.CANCELLED.name
+    }.take(6)
     val queueFull = active.size >= 10
     var sourceFile by remember { mutableStateOf<File?>(null) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -256,6 +262,23 @@ fun PaintScreen(
                 }
             }
 
+            if (failed.isNotEmpty()) {
+                item {
+                    Text(
+                        stringResource(R.string.paint_failed_section),
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+                items(failed, key = { "f${it.id}" }) { t ->
+                    FailedCard(
+                        task = t,
+                        onRetry = { engine.retry(t) },
+                        onDelete = { scope.launch { engine.deleteLocal(t.id) } }
+                    )
+                }
+            }
+
             if (tasks.isEmpty()) {
                 item {
                     Box(Modifier.fillMaxWidth().padding(vertical = 48.dp), contentAlignment = Alignment.Center) {
@@ -295,7 +318,9 @@ private fun ActiveTaskCard(task: PainterTask, now: Long, onCancel: () -> Unit) {
         TaskStatus.GENERATING -> stringResource(R.string.state_generating)
         TaskStatus.DOWNLOADING -> stringResource(R.string.state_downloading)
         TaskStatus.CLEANING -> stringResource(R.string.state_cleaning)
-        else -> stringResource(R.string.state_done)
+        TaskStatus.DONE -> stringResource(R.string.state_done)
+        TaskStatus.FAILED -> stringResource(R.string.state_failed)
+        TaskStatus.CANCELLED -> stringResource(R.string.state_cancelled)
     }
     val waited = ((now - task.createdAt) / 1000).toInt().coerceAtLeast(0)
 
@@ -325,10 +350,54 @@ private fun ActiveTaskCard(task: PainterTask, now: Long, onCancel: () -> Unit) {
             )
             Spacer(Modifier.height(8.dp))
             LinearProgressIndicator(Modifier.fillMaxWidth().height(3.dp))
-            if (status == TaskStatus.QUEUED) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = onCancel) { Text(stringResource(R.string.action_cancel)) }
-                }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onCancel) { Text(stringResource(R.string.action_cancel)) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FailedCard(task: PainterTask, onRetry: () -> Unit, onDelete: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f)
+        )
+    ) {
+        Column(Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Outlined.Warning,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.error
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    stringResource(R.string.state_failed),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                task.prompt,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                task.errorMsg?.takeIf { it.isNotBlank() } ?: stringResource(R.string.state_failed),
+                style = MaterialTheme.typography.bodySmall
+            )
+            Spacer(Modifier.height(4.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onRetry) { Text(stringResource(R.string.action_retry)) }
+                TextButton(onClick = onDelete) { Text(stringResource(R.string.action_delete)) }
             }
         }
     }

@@ -107,14 +107,21 @@ class PaintEngine(context: Context) {
         }
     }
 
+    /** 任何未完成状态都能取消：原来只对排队态生效，跑起来就再也停不下来。 */
     fun cancel(id: Long) {
         scope.launch {
             val t = db.tasks().byId(id) ?: return@launch
-            if (t.status == TaskStatus.QUEUED.name) {
-                db.tasks().update(t.copy(status = TaskStatus.CANCELLED.name))
+            val st = runCatching { TaskStatus.valueOf(t.status) }.getOrDefault(TaskStatus.QUEUED)
+            if (st.ordinal < TaskStatus.DONE.ordinal) {
+                db.tasks().update(
+                    t.copy(status = TaskStatus.CANCELLED.name, finishedAt = System.currentTimeMillis())
+                )
             }
         }
     }
+
+    private suspend fun cancelled(id: Long): Boolean =
+        db.tasks().byId(id)?.status == TaskStatus.CANCELLED.name
 
     private suspend fun patch(id: Long, block: (PainterTask) -> PainterTask) {
         val t = db.tasks().byId(id) ?: return
@@ -145,8 +152,8 @@ class PaintEngine(context: Context) {
             val seen = db.moments().all().toHashSet()
 
             // 3) 发帖
-            val imageId = uploadInput(task.inputImagePath)
-            val triggerId = createWithRetry(task.prompt, bot.first, bot.second, imageId)
+            val image = uploadInput(task.inputImagePath)
+            val triggerId = createWithRetry(task.prompt, bot.first, bot.second, image)
             if (triggerId.isEmpty()) {
                 fail(taskId, -1, "发帖未返回 ID")
                 return
@@ -155,10 +162,29 @@ class PaintEngine(context: Context) {
                 it.copy(status = TaskStatus.GENERATING.name, triggerMomentId = triggerId)
             }
 
+            // 回查确认：接口给了 id 不代表动态真的存在（可能被风控吞掉）。
+            // 查不到就当场失败，不能让界面一直显示「画师正在创作」。
+            var self = runCatching { KimiApi.getMoment(triggerId) }.getOrNull()
+            var tries = 0
+            while ((self == null || self.id.isEmpty()) && tries < 2) {
+                delay(1_500)
+                self = runCatching { KimiApi.getMoment(triggerId) }.getOrNull()
+                tries++
+            }
+            if (self == null || self.id.isEmpty()) {
+                fail(taskId, -5, "动态没有发布成功：平台查不到这条动态，可能被拦截")
+                return
+            }
+            if (!self.text.contains("@")) {
+                fail(taskId, -6, "动态发出去了，但正文里的 @ 没生效，画师收不到，请重试")
+                return
+            }
+
             // 4) 轮询成品
             val moment = awaitResult(taskId, triggerId, watermark, ownerId, seen, cfg)
             if (moment == null) {
-                fail(taskId, -3, "等待超时")
+                // 用户取消不算失败，别把状态改写回去
+                if (!cancelled(taskId)) fail(taskId, -3, "等待超时")
                 return
             }
             db.moments().remember(SeenMoment(moment.id, System.currentTimeMillis()))
@@ -175,6 +201,7 @@ class PaintEngine(context: Context) {
             // 5) 下载（字节直存）
             val paths = mutableListOf<String>()
             moment.images.forEachIndexed { idx, img ->
+                if (cancelled(taskId)) return
                 val bytes = downloadWithRetry(img.best)
                 if (bytes != null) {
                     val f = ImageSaver.saveToHistory(app, taskId, idx, bytes)
@@ -203,9 +230,9 @@ class PaintEngine(context: Context) {
                 )
             }
         } catch (e: ApiException) {
-            fail(taskId, e.code, e.message ?: "请求失败")
+            if (!cancelled(taskId)) fail(taskId, e.code, e.message ?: "请求失败")
         } catch (e: Exception) {
-            fail(taskId, -99, e.message ?: "未知错误")
+            if (!cancelled(taskId)) fail(taskId, -99, e.message ?: "未知错误")
         }
     }
 
@@ -228,11 +255,11 @@ class PaintEngine(context: Context) {
         return w
     }
 
-    /** 底图上传，返回 fileId；没有底图或上传失败返回空串（退化为纯文生图）。 */
-    private suspend fun uploadInput(path: String?): String {
-        if (path.isNullOrEmpty()) return ""
+    /** 底图上传；没有底图或上传失败返回 null（退化为纯文生图）。 */
+    private suspend fun uploadInput(path: String?): KimiApi.UploadedImage? {
+        if (path.isNullOrEmpty()) return null
         val f = File(path)
-        if (!f.exists()) return ""
+        if (!f.exists()) return null
         return try {
             val bytes = f.readBytes()
             val opt = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -244,7 +271,7 @@ class PaintEngine(context: Context) {
             }
             KimiApi.uploadImage(bytes, f.name, mime, opt.outWidth, opt.outHeight)
         } catch (e: Exception) {
-            ""
+            null
         }
     }
 
@@ -252,13 +279,18 @@ class PaintEngine(context: Context) {
         prompt: String,
         botId: String,
         botName: String,
-        imageId: String
+        image: KimiApi.UploadedImage?
     ): String {
         var attempt = 0
         while (true) {
             try {
-                return KimiApi.createMoment(prompt, botId, botName, imageId = imageId)
+                return KimiApi.createMoment(prompt, botId, botName, image = image)
             } catch (e: ApiException) {
+                // 带图被拒（参数或审核）时，去掉图片再发一次，别让整单卡死
+                if (image != null && e.code != 429 && e.code != 401 && e.code != 403) {
+                    return runCatching { KimiApi.createMoment(prompt, botId, botName, image = null) }
+                        .getOrElse { throw e }
+                }
                 attempt++
                 if (e.code == 429 && attempt <= 3) {
                     delay(120_000)
