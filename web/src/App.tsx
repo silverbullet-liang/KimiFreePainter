@@ -7,6 +7,7 @@ import {
   deleteMoment,
   extractIntro,
   extractMomentIds,
+  getMe,
   getMoment,
   hasTokens,
   jwtLeftDays,
@@ -21,6 +22,7 @@ import {
   type Moment
 } from './api/kimi'
 import QrLogin from './QrLogin'
+import { refreshTokens } from './api/auth'
 
 type Status = 'idle' | 'posting' | 'waiting' | 'done' | 'failed'
 type Tab = 'paint' | 'history' | 'settings'
@@ -65,9 +67,34 @@ export default function App() {
   const [clean, setClean] = useState(() => localStorage.getItem('kfp_clean') || 'trigger')
   const [poll, setPoll] = useState(() => Number(localStorage.getItem('kfp_poll') || 10))
   const [openId, setOpenId] = useState<string | null>(null)
+  const [nick, setNick] = useState(() => localStorage.getItem('kfp_nick') || '')
   const [pick, setPick] = useState<File | null>(null)
   const [pickUrl, setPickUrl] = useState('')
   const timer = useRef<number | null>(null)
+
+  // 登录态实时维护：access 到期自动用刷新态换新，换不动就判定掉线
+  useEffect(() => {
+    if (!tokens.refresh) return
+    let alive = true
+    const check = async () => {
+      const left = jwtLeftDays(tokens.access)
+      if (left >= 0) return
+      try {
+        const next = await refreshTokens(tokens.refresh)
+        if (!alive || !next.access) return
+        setTokens(next)
+        saveTokens(next)
+      } catch {
+        /* 刷新失败不动它：可能是临时网络问题，下一轮再试 */
+      }
+    }
+    void check()
+    const t = window.setInterval(() => void check(), 60_000)
+    return () => {
+      alive = false
+      window.clearInterval(t)
+    }
+  }, [tokens.access, tokens.refresh])
 
   const logged = hasTokens()
   const refreshDays = useMemo(() => jwtLeftDays(tokens.refresh), [tokens])
@@ -230,11 +257,6 @@ export default function App() {
     }
   }
 
-  function persistTokens() {
-    saveTokens({ access: tokens.access.trim(), refresh: tokens.refresh.trim() })
-    setTokens({ access: tokens.access.trim(), refresh: tokens.refresh.trim() })
-  }
-
   return (
     <div className="app">
       <header>
@@ -242,7 +264,10 @@ export default function App() {
           <Brush />
           <span>免费画师</span>
         </div>
-        <span className={`dot ${logged ? 'on' : ''}`} title={logged ? '已填写登录态' : '未填写登录态'} />
+        <span className={`who ${logged ? 'on' : ''}`}>
+          <span className={`dot ${logged ? 'on' : ''}`} />
+          {logged ? nick || '已登录' : '未登录'}
+        </span>
       </header>
 
       <main>
@@ -410,43 +435,38 @@ export default function App() {
                   const next = { access, refresh }
                   setTokens(next)
                   saveTokens(next)
+                  void getMe()
+                    .then((u) => {
+                      setNick(u.name)
+                      localStorage.setItem('kfp_nick', u.name)
+                    })
+                    .catch(() => undefined)
                 }}
               />
             </section>
 
             <section>
-              <h2>登录态</h2>
-              <p className="hint">也可以在平台网页登录后，从浏览器开发者工具复制两个令牌粘贴到此处。数据仅存本机。</p>
-              <label>access_token（可直接粘贴整段 JSON / 两个 JWT，自动拆分）</label>
-              <textarea
-                rows={3}
-                value={tokens.access}
-                onChange={(e) => setTokens({ ...tokens, access: e.target.value })}
-                onPaste={(e) => {
-                  const blob = parseTokenBlob(e.clipboardData.getData('text'))
-                  if (blob) {
-                    e.preventDefault()
-                    setTokens(blob)
-                  }
-                }}
-              />
-              <label>refresh_token</label>
-              <textarea rows={3} value={tokens.refresh} onChange={(e) => setTokens({ ...tokens, refresh: e.target.value })} />
-              <div className="row">
-                <button className="primary" onClick={persistTokens}>保存</button>
-                <button
-                  className="ghost"
-                  onClick={() => {
-                    clearTokens()
-                    setTokens({ access: '', refresh: '' })
-                  }}
-                >
-                  清除
-                </button>
-              </div>
-              <p className="hint">
-                {logged ? `刷新态剩余 ${refreshDays >= 0 ? refreshDays + ' 天' : '未知'}` : '尚未填写'}
-              </p>
+              <h2>账号</h2>
+              {logged ? (
+                <>
+                  <p className="hint">
+                    {nick || '已登录'} · 刷新态剩余 {refreshDays >= 0 ? refreshDays + ' 天' : '未知'}
+                  </p>
+                  <button
+                    className="ghost wide"
+                    onClick={() => {
+                      clearTokens()
+                      setTokens({ access: '', refresh: '' })
+                      setNick('')
+                      localStorage.removeItem('kfp_nick')
+                    }}
+                  >
+                    退出登录
+                  </button>
+                </>
+              ) : (
+                <p className="hint">还未登录，扫上面的二维码即可，不需要填写任何令牌。</p>
+              )}
             </section>
 
             <section>
@@ -543,27 +563,6 @@ async function cleanPosts(triggerId: string, resultId?: string): Promise<boolean
     }
   }
   return ok
-}
-
-/**
- * 兼容三种剪贴板内容：JSON（accessToken/access_token/a 任意键名）、
- * 「access + refresh」两行、以及只含一个 JWT 的纯文本。
- */
-function parseTokenBlob(raw: string): { access: string; refresh: string } | null {
-  const text = raw.trim()
-  if (!text) return null
-  try {
-    const j = JSON.parse(text) as { [k: string]: string }
-    const access = j.accessToken || j.access_token || j.access || j.a || ''
-    const refresh = j.refreshToken || j.refresh_token || j.refresh || j.r || ''
-    if (access || refresh) return { access, refresh }
-  } catch {
-    /* 不是 JSON，继续按文本处理 */
-  }
-  const jwts = text.match(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g)
-  if (jwts && jwts.length >= 2) return { access: jwts[0], refresh: jwts[1] }
-  if (jwts && jwts.length === 1) return { access: jwts[0], refresh: '' }
-  return null
 }
 
 function Brush() {

@@ -207,6 +207,13 @@ function parseMoment(m: any): Moment {
   }
 }
 
+/** 取当前账号资料，用于界面上显示昵称。 */
+export async function getMe(): Promise<{ name: string; userId: string }> {
+  const r = await call<any>('/moment.v1.UserService/GetMe', { view: 'VIEW_DEFAULT' })
+  const b = r?.userBase ?? r?.user ?? {}
+  return { name: b.name || b.nickname || '', userId: b.userId || b.id || '' }
+}
+
 export async function listBots(): Promise<Bot[]> {
   const r = await call<{ bots?: any[] }>('/moment.v1.UserService/ListMentionableBots', {
     sceneType: 'MENTIONABLE_SCENE_TYPE_AGENT'

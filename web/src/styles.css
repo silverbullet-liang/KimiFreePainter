@@ -138,3 +138,8 @@ button.wide { width: 100%; }
   color: var(--muted);
 }
 .pick-prev .icon svg { width: 12px; height: 12px; }
+
+.who { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); max-width: 46vw; }
+.who.on { color: var(--fg); }
+.who .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--line); flex: none; }
+.who .dot.on { background: #18a058; }

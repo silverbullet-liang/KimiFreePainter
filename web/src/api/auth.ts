@@ -115,3 +115,18 @@ export function webId(): string {
 export function qrContent(code: string): string {
   return `https://www.kimi.com/wechat/mp/auth?id=${encodeURIComponent(code)}&device_id=${encodeURIComponent(webId())}`
 }
+
+/**
+ * 双令牌轮换。刷新态过期或 access 到期时用它续命，
+ * 这样界面上的「已登录」不会名存实亡。
+ */
+export async function refreshTokens(current: string): Promise<{ access: string; refresh: string }> {
+  const d = await rpc<any>('/account.gateway.v1.AuthService/RefreshToken', {
+    refresh_token: current,
+    refreshToken: current
+  })
+  return {
+    access: pick(d, ['accessToken', 'access_token']),
+    refresh: pick(d, ['refreshToken', 'refresh_token']) || current
+  }
+}
