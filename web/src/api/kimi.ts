@@ -332,3 +332,52 @@ export function extractMomentIds(text: string): string[] {
   }
   return [...out]
 }
+
+/**
+ * 从成品帖正文里剥出「简介」。
+ *
+ * 成品帖正文的结构是：简介 + 「@画师 提示词」引用块 + 「—— 昵称」署名。
+ * 这里不认画师名、也不认用户昵称，只按三件事剥离，换名字也不会失效：
+ *   1. 以 @ 开头的提及行
+ *   2. 纯破折号署名行
+ *   3. 正文里原样引用的本次提示词（以 prompt 为准逐行比对）
+ * 剥完为空时退回原文，宁可多显示也不空白。
+ */
+export function extractIntro(raw: string, prompt: string): string {
+  const text = (raw || '').replace(/\r\n?/g, '\n')
+  if (!text.trim()) return ''
+
+  const norm = (s: string) => s.replace(/[\s@]/g, '').toLowerCase()
+  const pn = norm(prompt || '')
+
+  const junk = (line: string): boolean => {
+    const s = line.trim()
+    if (!s) return false
+    if (/^@\S/.test(s)) return true // @画师 提及行
+    if (/^[—–―]{2,}\s*\S{0,30}$/.test(s)) return true // —— 昵称
+    if (pn) {
+      const n = norm(s)
+      if (n.length >= 6 && pn.includes(n)) return true // 提示词的一行
+    }
+    return false
+  }
+
+  const kept = text.split('\n').filter((l) => !junk(l))
+
+  // 再按段清一次：提示词被平台合并/改写后，整段仍可能是它的片段
+  const blocks = kept.join('\n').split(/\n{2,}/).filter((b) => {
+    const n = norm(b)
+    if (!n) return false
+    if (!pn || n.length < 10) return true
+    return !(pn.includes(n) || n.includes(pn))
+  })
+
+  const out = blocks.join('\n\n').replace(/\n{3,}/g, '\n\n').trim()
+  if (out) return out
+
+  return text
+    .replace(/^@\S.*$/gm, '')
+    .replace(/^[—–―]{2,}\s*\S{0,30}$/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}

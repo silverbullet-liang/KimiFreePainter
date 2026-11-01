@@ -5,6 +5,7 @@ import {
   clearTokens,
   createMoment,
   deleteMoment,
+  extractIntro,
   extractMomentIds,
   getMoment,
   hasTokens,
@@ -18,6 +19,7 @@ import {
   saveTokens,
   type Moment
 } from './api/kimi'
+import QrLogin from './QrLogin'
 
 type Status = 'idle' | 'posting' | 'waiting' | 'done' | 'failed'
 type Tab = 'paint' | 'history' | 'settings'
@@ -26,6 +28,7 @@ type Record = {
   prompt: string
   title: string
   caption: string
+  raw?: string
   images: string[]
   at: number
   triggerId: string
@@ -33,6 +36,13 @@ type Record = {
 }
 
 const HIST = 'kfp_history'
+
+/** 算法更新后旧记录也能重新解析：有原文就现算，没有才用当时存的。标题已在正文里时去重。 */
+function captionOf(r: Record): string {
+  const c = r.raw ? extractIntro(r.raw, r.prompt) : r.caption
+  if (r.title && c.startsWith(r.title)) return c.slice(r.title.length).replace(/^[\s:：]+/, '')
+  return c
+}
 
 function loadHistory(): Record[] {
   try {
@@ -181,7 +191,8 @@ export default function App() {
         id: hit.id,
         prompt: text,
         title: hit.title,
-        caption: cleanCaption(hit.text),
+        caption: extractIntro(hit.text, text),
+        raw: hit.text,
         images: hit.images.map((i) => i.originUrl || i.downloadUrl),
         at: Date.now(),
         triggerId
@@ -265,12 +276,12 @@ export default function App() {
                   <img
                     key={src}
                     src={src}
-                    alt={result.title || result.caption}
+                    alt={result.title || captionOf(result)}
                     referrerPolicy="no-referrer"
                   />
                 ))}
                 {result.title && <p className="title">{result.title}</p>}
-                {result.caption && <p className="caption">{result.caption}</p>}
+                {captionOf(result) && <p className="caption">{captionOf(result)}</p>}
                 {result.cleaned !== undefined && (
                   <p className="hint">
                     {result.cleaned ? '社区帖子已清理' : '帖子清理失败，可在历史里重试'}
@@ -350,8 +361,20 @@ export default function App() {
         {tab === 'settings' && (
           <>
             <section>
+              <h2>扫码登录</h2>
+              <p className="hint">用 Kimi App 扫码，令牌自动写入本机，不经过任何服务器。</p>
+              <QrLogin
+                onDone={(access, refresh) => {
+                  const next = { access, refresh }
+                  setTokens(next)
+                  saveTokens(next)
+                }}
+              />
+            </section>
+
+            <section>
               <h2>登录态</h2>
-              <p className="hint">在平台网页登录后，从浏览器开发者工具复制两个令牌粘贴到此处。数据仅存本机。</p>
+              <p className="hint">也可以在平台网页登录后，从浏览器开发者工具复制两个令牌粘贴到此处。数据仅存本机。</p>
               <label>access_token（可直接粘贴整段 JSON / 两个 JWT，自动拆分）</label>
               <textarea
                 rows={3}
@@ -428,9 +451,9 @@ export default function App() {
             .filter((h) => h.id === openId)
             .map((h) => (
               <div className="sheet-inner" key={h.id} onClick={(e) => e.stopPropagation()}>
-                {h.images[0] && <img src={h.images[0]} alt={h.title || h.caption} referrerPolicy="no-referrer" />}
+                {h.images[0] && <img src={h.images[0]} alt={h.title || captionOf(h)} referrerPolicy="no-referrer" />}
                 {h.title && <p className="title">{h.title}</p>}
-                {h.caption && <p className="caption">{h.caption}</p>}
+                {captionOf(h) && <p className="caption">{captionOf(h)}</p>}
                 <p className="caption sub">提示词：{h.prompt}</p>
                 <div className="row">
                   <a className="primary" href={h.images[0]} download target="_blank" rel="noreferrer">
@@ -458,14 +481,6 @@ export default function App() {
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms))
-}
-
-/** 成品帖正文尾部会带「—— AI画师」署名与「@AI画师 提示词 ——昵称」的引用块，展示时截掉。 */
-function cleanCaption(raw: string): string {
-  return (raw || '')
-    .replace(/\n\s*@AI画师[\s\S]*$/, '')
-    .replace(/\n\s*[—–-]{1,3}\s*AI画师\s*$/g, '')
-    .trim()
 }
 
 /** 删帖：返回是否全部成功。结果页与历史详情都复用这一处。 */

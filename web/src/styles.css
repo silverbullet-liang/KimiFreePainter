@@ -100,3 +100,18 @@ nav button.on { color: var(--accent); }
   padding: 16px; display: flex; flex-direction: column; gap: 12px;
   max-height: 92dvh; overflow: auto;
 }
+
+/* 扫码登录 */
+.qr { display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%; }
+.qr-box {
+  width: 200px; height: 200px; padding: 10px; border-radius: 16px;
+  background: #fff; border: 1px solid var(--line);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--muted); font-size: 13px; text-align: center;
+}
+.qr-box svg { display: block; }
+.qr-hint { margin: 0; font-size: 13px; color: var(--muted); text-align: center; }
+.qr-hint.wait { color: var(--accent); }
+.qr-hint.ok { color: #18a058; }
+.qr-hint.bad { color: #d03050; }
+button.wide { width: 100%; }
