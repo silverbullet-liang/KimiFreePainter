@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import android.util.Base64
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import kotlinx.coroutines.flow.MutableStateFlow
 import com.kimifreepainter.data.api.TokenStore
 import org.json.JSONObject
 
@@ -16,6 +17,12 @@ object AuthManager : TokenStore {
 
     private const val FILE = "kimpainter_auth"
     private lateinit var sp: SharedPreferences
+
+    /** 登录态版本号：任何写入都 +1，UI 订阅它即可实时反映。 */
+    val revision = MutableStateFlow(0L)
+    private fun touch() {
+        revision.value = revision.value + 1
+    }
 
     fun init(context: Context) {
         sp = try {
@@ -37,10 +44,12 @@ object AuthManager : TokenStore {
 
     override fun onTokens(access: String, refresh: String) {
         sp.edit().putString("access", access).putString("refresh", refresh).apply()
+        touch()
     }
 
     override fun onSessionLost() {
         sp.edit().remove("access").remove("refresh").apply()
+        touch()
     }
 
     fun saveSession(access: String, refresh: String, userId: String, name: String) {
@@ -50,9 +59,13 @@ object AuthManager : TokenStore {
             .putString("userId", userId)
             .putString("name", name)
             .apply()
+        touch()
     }
 
-    fun clear() = sp.edit().clear().apply()
+    fun clear() {
+        sp.edit().clear().apply()
+        touch()
+    }
 
     val isLoggedIn: Boolean get() = !accessToken().isNullOrEmpty() || !refreshToken().isNullOrEmpty()
     val hasAccess: Boolean get() = !accessToken().isNullOrEmpty()
@@ -61,7 +74,10 @@ object AuthManager : TokenStore {
     val userId: String get() = sp.getString("userId", "").orEmpty()
     var nickname: String
         get() = sp.getString("name", "").orEmpty()
-        set(v) = sp.edit().putString("name", v).apply()
+        set(v) {
+            sp.edit().putString("name", v).apply()
+            touch()
+        }
 
     /** access 剩余秒数（JWT exp - now），解析失败返回 -1。 */
     fun accessLeftSeconds(): Long {

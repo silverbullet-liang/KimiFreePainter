@@ -34,6 +34,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -122,6 +123,20 @@ fun PaintScreen(
         TopAppBar(
             title = {
                 Text(stringResource(R.string.app_name), fontWeight = FontWeight.SemiBold)
+            },
+            actions = {
+                val rev = AuthManager.revision.collectAsState().value
+                val ok = remember(rev) { AuthManager.isLoggedIn }
+                val days = remember(rev) { AuthManager.refreshLeftDays() }
+                Text(
+                    text = if (ok) {
+                        val who = AuthManager.nickname.ifEmpty { "已登录" }
+                        if (days >= 0) "$who · 剩 ${days.toInt()} 天" else who
+                    } else "未登录 · 点设置登录",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(end = 14.dp)
+                )
             }
         )
 

@@ -41,8 +41,8 @@ import com.kimifreepainter.data.db.PainterTask
 import com.kimifreepainter.data.repo.PaintEngine
 import com.kimifreepainter.data.settings.Settings
 import com.kimifreepainter.data.settings.SettingsRepository
-import com.kimifreepainter.data.webview.LoginWebView
 import com.kimifreepainter.ui.history.HistoryScreen
+import com.kimifreepainter.ui.login.QrLoginDialog
 import com.kimifreepainter.ui.history.TaskDetailDialog
 import com.kimifreepainter.ui.paint.PaintScreen
 import com.kimifreepainter.ui.settings.SettingsScreen
@@ -115,61 +115,10 @@ fun MainScaffold(
     }
 
     if (showLogin) {
-        LoginSheet(onDismiss = { showLogin = false })
+        QrLoginDialog(onDismiss = { showLogin = false })
     }
 
     detail?.let {
         TaskDetailDialog(task = it, engine = engine, onDismiss = onCloseDetail)
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun LoginSheet(onDismiss: () -> Unit) {
-    val context = LocalContext.current
-    var hint by remember { mutableStateOf<String?>(null) }
-    val bridge = remember {
-        LoginWebView { ok, msg ->
-            hint = msg
-            if (ok) onDismiss()
-        }
-    }
-
-    Dialog(
-        onDismissRequest = { bridge.detach(); onDismiss() },
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            Column(Modifier.fillMaxSize()) {
-                TopAppBar(
-                    title = { Text(stringResource(R.string.login_title)) },
-                    navigationIcon = {
-                        IconButton(onClick = { bridge.detach(); onDismiss() }) {
-                            Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.action_close))
-                        }
-                    }
-                )
-                Text(
-                    text = hint ?: stringResource(R.string.login_desc),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Start
-                )
-                AndroidView(
-                    modifier = Modifier.fillMaxWidth().weight(1f).padding(top = 8.dp),
-                    factory = { ctx ->
-                        WebView(ctx).also { bridge.attach(it) }
-                    },
-                    onRelease = { it.destroy() }
-                )
-                OutlinedButton(
-                    onClick = { bridge.extract() },
-                    modifier = Modifier.fillMaxWidth().padding(16.dp)
-                ) {
-                    Text(stringResource(R.string.login_save))
-                }
-            }
-        }
     }
 }

@@ -38,6 +38,7 @@ import com.kimifreepainter.data.auth.AuthManager
 import com.kimifreepainter.data.settings.CleanMode
 import com.kimifreepainter.data.settings.Settings
 import com.kimifreepainter.data.settings.SettingsRepository
+import androidx.compose.runtime.collectAsState
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -51,9 +52,11 @@ fun SettingsScreen(
 ) {
     val scope = rememberCoroutineScope()
     var tick by remember { mutableIntStateOf(0) }
-    val loggedIn = AuthManager.isLoggedIn
-    val accessOk = AuthManager.hasAccess
-    val refreshDays = AuthManager.refreshLeftDays()
+    // 订阅登录态版本号：扫码成功后立刻反映，不用手动刷新页面
+    val rev = AuthManager.revision.collectAsState().value
+    val loggedIn = remember(rev) { AuthManager.isLoggedIn }
+    val accessOk = remember(rev) { AuthManager.hasAccess }
+    val refreshDays = remember(rev) { AuthManager.refreshLeftDays() }
 
     var showClean by remember { mutableStateOf(false) }
     var showDelay by remember { mutableStateOf(false) }
