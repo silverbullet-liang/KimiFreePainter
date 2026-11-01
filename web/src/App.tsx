@@ -118,7 +118,7 @@ export default function App() {
     const text = prompt.trim()
     if (!text || status === 'posting' || status === 'waiting') return
     if (!logged) {
-      setError('请先在设置里填写登录态')
+      setError('请先在设置页扫码登录')
       setTab('settings')
       return
     }
@@ -144,7 +144,22 @@ export default function App() {
       // 带图即改图：一条动态只吃一张，平台侧限制
       const imageId = pick ? await uploadImage(pick) : ''
       const triggerId = await createMoment(text, botId, AI_BOT, imageId)
-      if (!triggerId) throw new Error('发帖未返回动态 ID，请稍后重试')
+      if (!triggerId) throw new Error('发帖没有返回动态 ID')
+
+      // 回查确认：接口给了 id 不代表动态真的存在（可能被风控吞掉）。
+      // 查不到就当场失败，不能让界面一直停在「画师正在创作」。
+      let self = await getMoment(triggerId).catch(() => null)
+      for (let i = 0; i < 2 && (!self || !self.id); i++) {
+        await sleep(1500)
+        self = await getMoment(triggerId).catch(() => null)
+      }
+      if (!self || !self.id) {
+        throw new Error('动态没有发布成功：平台查不到这条动态，可能被拦截或账号受限')
+      }
+      if (self.text && !self.text.includes('@')) {
+        throw new Error('动态发出去了，但正文里的 @ 没生效，画师收不到，请重试')
+      }
+
       knownIds.add(triggerId)
       setStatus('waiting')
 
@@ -335,7 +350,12 @@ export default function App() {
               </div>
             )}
 
-            {error && <p className="error">{error}</p>}
+            {error && (
+              <div className="card err">
+                <strong>没能完成</strong>
+                <span>{error}</span>
+              </div>
+            )}
 
             {result && (
               <div className="card result">
