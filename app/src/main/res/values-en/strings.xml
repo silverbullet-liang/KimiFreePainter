@@ -9,6 +9,9 @@
     <string name="paint_hint">Describe the image you want</string>
     <string name="paint_counter">%1$d chars</string>
     <string name="paint_submit">Start</string>
+    <string name="paint_pick_image">Pick an image (edit)</string>
+    <string name="paint_clear_image">Remove</string>
+    <string name="paint_image_failed">Failed to read image</string>
     <string name="paint_clear">Clear</string>
     <string name="paint_empty_title">Nothing yet</string>
     <string name="paint_empty_desc">Type a prompt and the painter will start</string>

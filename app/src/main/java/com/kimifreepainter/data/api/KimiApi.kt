@@ -2,7 +2,9 @@ package com.kimifreepainter.data.api
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -75,7 +77,8 @@ object KimiApi {
         text: String,
         mentionUserId: String,
         mentionName: String,
-        publicVisible: Boolean = true
+        publicVisible: Boolean = true,
+        imageId: String = ""
     ): String {
         val mention = "@$mentionName"
         val withMention = if (mentionName.isNotEmpty() && !text.contains(mention)) {
@@ -98,8 +101,51 @@ object KimiApi {
                 )
             )
         }
+        // 带图即改图：图片随动态发出，画师以它为底图重绘。平台一条动态只吃一张。
+        if (imageId.isNotEmpty()) {
+            body.put("images", JSONArray().put(JSONObject().put("fileId", imageId)))
+        }
         val r = ApiClient.post("/moment.v1.MomentService/CreateMoment", body)
         return r.optJSONObject("moment")?.optString("id").orEmpty()
+    }
+
+    /**
+     * 图片三步上传：申请预签名地址 → PUT 直传云存储 → 登记文件。
+     * 发帖时 images 字段要的是登记后的 fileId，直传地址本身不参与发帖。
+     */
+    suspend fun uploadImage(
+        bytes: ByteArray,
+        fileName: String,
+        contentType: String,
+        width: Int,
+        height: Int
+    ): String {
+        val pre = ApiClient.post(
+            "/moment.v1.UploadService/GeneratePresignedURL",
+            JSONObject().put("fileType", "FILE_TYPE_IMAGE")
+        )
+        val uploadUrl = pre.optString("uploadUrl")
+        val preFileId = pre.optString("fileId")
+        if (uploadUrl.isEmpty() || preFileId.isEmpty()) throw ApiException(-1, "未获取到上传地址")
+
+        withContext(Dispatchers.IO) {
+            val req = Request.Builder()
+                .url(uploadUrl)
+                .put(bytes.toRequestBody((contentType.ifEmpty { "image/jpeg" }).toMediaType()))
+                .build()
+            ApiClient.http.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) throw ApiException(resp.code, "图片直传失败")
+            }
+        }
+
+        val made = ApiClient.post(
+            "/moment.v1.UploadService/CreateFile",
+            JSONObject()
+                .put("fileName", fileName.ifEmpty { "image.jpg" })
+                .put("fileId", preFileId)
+                .put("extra", JSONObject().put("width", width).put("height", height))
+        )
+        return made.optString("fileId").ifEmpty { preFileId }
     }
 
     suspend fun deleteMoment(momentId: String) {

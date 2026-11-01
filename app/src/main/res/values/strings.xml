@@ -9,6 +9,9 @@
     <string name="paint_hint">描述你想要的画面</string>
     <string name="paint_counter">%1$d 字</string>
     <string name="paint_submit">开始创作</string>
+    <string name="paint_pick_image">选择底图（改图）</string>
+    <string name="paint_clear_image">移除</string>
+    <string name="paint_image_failed">读取图片失败</string>
     <string name="paint_clear">清空</string>
     <string name="paint_empty_title">还没有作品</string>
     <string name="paint_empty_desc">输入提示词，画师会为你开始创作</string>

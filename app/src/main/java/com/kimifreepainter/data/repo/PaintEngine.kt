@@ -1,6 +1,7 @@
 package com.kimifreepainter.data.repo
 
 import android.content.Context
+import android.graphics.BitmapFactory
 import com.kimifreepainter.data.api.ApiException
 import com.kimifreepainter.data.api.KimiApi
 import com.kimifreepainter.data.auth.AuthManager
@@ -22,6 +23,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.json.JSONArray
+import java.io.File
 
 enum class TaskStatus {
     QUEUED, POSTING, GENERATING, DOWNLOADING, CLEANING, DONE, FAILED, CANCELLED
@@ -60,7 +62,7 @@ class PaintEngine(context: Context) {
         }
     }
 
-    suspend fun submit(prompt: String): Long? {
+    suspend fun submit(prompt: String, inputBytes: ByteArray? = null): Long? {
         if (prompt.isBlank()) return null
         if (db.tasks().activeCount() >= 10) return null
         val cfg = settingsRepo.flow.first()
@@ -73,6 +75,11 @@ class PaintEngine(context: Context) {
                 createdAt = System.currentTimeMillis()
             )
         )
+        // 选图立刻落到任务目录：相册的临时授权在后台任务里不可靠
+        if (inputBytes != null && inputBytes.isNotEmpty()) {
+            val f = ImageSaver.saveInput(app, id, inputBytes)
+            db.tasks().byId(id)?.let { db.tasks().update(it.copy(inputImagePath = f.absolutePath)) }
+        }
         queue.send(id)
         return id
     }
@@ -138,7 +145,8 @@ class PaintEngine(context: Context) {
             val seen = db.moments().all().toHashSet()
 
             // 3) 发帖
-            val triggerId = createWithRetry(task.prompt, bot.first, bot.second)
+            val imageId = uploadInput(task.inputImagePath)
+            val triggerId = createWithRetry(task.prompt, bot.first, bot.second, imageId)
             if (triggerId.isEmpty()) {
                 fail(taskId, -1, "发帖未返回 ID")
                 return
@@ -220,11 +228,36 @@ class PaintEngine(context: Context) {
         return w
     }
 
-    private suspend fun createWithRetry(prompt: String, botId: String, botName: String): String {
+    /** 底图上传，返回 fileId；没有底图或上传失败返回空串（退化为纯文生图）。 */
+    private suspend fun uploadInput(path: String?): String {
+        if (path.isNullOrEmpty()) return ""
+        val f = File(path)
+        if (!f.exists()) return ""
+        return try {
+            val bytes = f.readBytes()
+            val opt = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opt)
+            val mime = when (f.extension.lowercase()) {
+                "png" -> "image/png"
+                "webp" -> "image/webp"
+                else -> "image/jpeg"
+            }
+            KimiApi.uploadImage(bytes, f.name, mime, opt.outWidth, opt.outHeight)
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    private suspend fun createWithRetry(
+        prompt: String,
+        botId: String,
+        botName: String,
+        imageId: String
+    ): String {
         var attempt = 0
         while (true) {
             try {
-                return KimiApi.createMoment(prompt, botId, botName)
+                return KimiApi.createMoment(prompt, botId, botName, imageId = imageId)
             } catch (e: ApiException) {
                 attempt++
                 if (e.code == 429 && attempt <= 3) {

@@ -30,6 +30,14 @@ object ImageSaver {
         return f
     }
 
+    /** 存用户选定的底图（改图用），返回绝对路径。 */
+    fun saveInput(context: Context, taskId: Long, bytes: ByteArray): File {
+        val dir = File(context.filesDir, "history/$taskId").apply { mkdirs() }
+        val f = File(dir, "input.${ext(bytes)}")
+        f.writeBytes(bytes)
+        return f
+    }
+
     /** 导出到相册。Android 10+ 走 MediaStore，不申请存储权限。 */
     fun saveToGallery(context: Context, file: File, displayName: String): Boolean = runCatching {
         val name = "$displayName.${file.extension}"

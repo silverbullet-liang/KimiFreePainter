@@ -1,5 +1,8 @@
 package com.kimifreepainter.ui.paint
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,6 +28,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -94,6 +98,24 @@ fun PaintScreen(
     val active = tasks.filter { TaskStatus.valueOf(it.status).ordinal < TaskStatus.DONE.ordinal }
     val finished = tasks.filter { it.status == TaskStatus.DONE.name }.take(6)
     val queueFull = active.size >= 10
+    var sourceFile by remember { mutableStateOf<File?>(null) }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val ext = context.contentResolver.getType(uri)?.substringAfter('/', "jpg") ?: "jpg"
+        val f = File(context.cacheDir, "input_${System.currentTimeMillis()}.$ext")
+        val ok = runCatching {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                f.outputStream().use { input.copyTo(it) }
+            } != null
+        }.getOrDefault(false)
+        if (ok && f.length() > 0) {
+            sourceFile?.delete()
+            sourceFile = f
+        } else {
+            f.delete()
+            toast = context.getString(R.string.paint_image_failed)
+        }
+    }
     val canSubmit = prompt.isNotBlank() && !queueFull && AuthManager.isLoggedIn
 
     Column(Modifier.fillMaxSize()) {
@@ -126,6 +148,34 @@ fun PaintScreen(
             }
 
             item {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            picker.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        },
+                        shape = RoundedCornerShape(14.dp)
+                    ) { Text(stringResource(R.string.paint_pick_image)) }
+                    val f = sourceFile
+                    if (f != null && f.exists()) {
+                        AsyncImage(
+                            model = f,
+                            contentDescription = null,
+                            modifier = Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)),
+                            contentScale = ContentScale.Crop
+                        )
+                        TextButton(onClick = { f.delete(); sourceFile = null }) {
+                            Text(stringResource(R.string.paint_clear_image))
+                        }
+                    }
+                }
+            }
+
+            item {
                 Button(
                     onClick = {
                         val text = prompt.trim()
@@ -142,12 +192,15 @@ fun PaintScreen(
                             toast = context.getString(R.string.queue_full)
                             return@Button
                         }
+                        val bytes = sourceFile?.takeIf { it.exists() }?.readBytes()
                         scope.launch {
-                            val id = engine.submit(text)
+                            val id = engine.submit(text, bytes)
                             if (id == null) {
                                 toast = context.getString(R.string.queue_full)
                             } else {
                                 prompt = ""
+                                sourceFile?.delete()
+                                sourceFile = null
                             }
                         }
                     },
