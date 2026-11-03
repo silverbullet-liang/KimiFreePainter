@@ -8,6 +8,7 @@ import {
   extractIntro,
   extractMomentIds,
   getMe,
+  getFeedBundle,
   getMoment,
   hasTokens,
   jwtLeftDays,
@@ -35,6 +36,7 @@ type Record = {
   title: string
   caption: string
   raw?: string
+  excerpt?: string
   images: string[]
   at: number
   triggerId: string
@@ -45,7 +47,7 @@ const HIST = 'kfp_history'
 
 /** 算法更新后旧记录也能重新解析：有原文就现算，没有才用当时存的。标题已在正文里时去重。 */
 function captionOf(r: Record): string {
-  const c = r.raw ? extractIntro(r.raw, r.prompt) : r.caption
+  const c = r.raw ? extractIntro(r.raw, r.prompt) || r.excerpt || '' : r.caption
   if (r.title && c.startsWith(r.title)) return c.slice(r.title.length).replace(/^[\s:：]+/, '')
   return c
 }
@@ -252,9 +254,16 @@ export default function App() {
           feeds.filter((x) => x.source === AI_SOURCE).length
         } 条 / 含引用 ${feeds.filter((x) => x.refMomentId).length} 条`
 
-        // 判据一：成品帖会带上它引用的动态 id（最直接）
+        // 判据一：引用关系，成品帖引用触发帖，或触发帖反过来引用成品帖
         hit = feeds.find((x) => x.refMomentId && x.refMomentId === triggerId) ?? null
-        // 判据二：新出现且带图的帖
+        if (!hit) {
+          const selfPost = feeds.find((x) => x.id === triggerId)
+          const back = selfPost?.refMomentId
+          if (back && back !== triggerId) {
+            hit = await getMoment(back).catch(() => null)
+          }
+        }
+        // 判据二：新出现且有图的帖（图在 media 或 cover 都算）
         if (!hit) {
           hit =
             pickNewArtifact(feeds, triggerId, knownIds, text) ??
@@ -262,18 +271,25 @@ export default function App() {
         }
         if (hit) break
 
-        // 判据三：列表可能不带图，对新出现的帖逐个回查详情
+        // 判据三：对新出现的帖逐个回查详情。有图、来源是 AI、或正文引用了本次提示词，都算成品帖
         const freshAny = feeds.filter((x) => x.id !== triggerId && !knownIds.has(x.id))
+        const head = text.slice(0, 12)
         for (const cand of freshAny) {
           const detail = await getMoment(cand.id).catch(() => null)
-          if (detail && detail.images.length > 0) {
+          if (!detail) continue
+          if (
+            detail.images.length > 0 ||
+            detail.cover !== '' ||
+            detail.source === AI_SOURCE ||
+            (head.length >= 4 && (detail.text ?? '').includes(head))
+          ) {
             hit = detail
             break
           }
         }
         if (hit) break
 
-        // 判据四：触发帖下的机器人回复。链接是富文本，URL 在 links 里而不是正文
+        // 判据四：触发帖的评论。链接是富文本，URL 在 links 里而不是正文
         const cs = await listComments(triggerId).catch(() => [])
         const reply = cs.find((c) => c.type === 'COMMENT_TYPE_BOT' || c.aiGenerated)
         if (reply) {
@@ -290,6 +306,21 @@ export default function App() {
           }
         }
         if (hit) break
+
+        // 判据五：GetFeed 的 similarMoments，成品帖有时只出现在这里
+        const bundle = await getFeedBundle(triggerId).catch(() => null)
+        if (bundle) {
+          const pool = [...bundle.similar, ...(bundle.moment ? [bundle.moment] : [])]
+          hit =
+            pool.find(
+              (x) =>
+                x.id !== triggerId &&
+                (x.images.length > 0 || x.cover !== '' || x.source === AI_SOURCE)
+            ) ?? null
+        }
+        if (hit) break
+
+        if (hit) break
       }
       if (!hit) throw new Error(`等待超时。诊断：${diag}`)
 
@@ -297,8 +328,9 @@ export default function App() {
         id: hit.id,
         prompt: text,
         title: hit.title,
-        caption: extractIntro(hit.text, text),
+        caption: extractIntro(hit.text, text) || hit.excerpt || '',
         raw: hit.text,
+        excerpt: hit.excerpt,
         images: hit.images.map((i) => i.originUrl || i.downloadUrl),
         at: Date.now(),
         triggerId

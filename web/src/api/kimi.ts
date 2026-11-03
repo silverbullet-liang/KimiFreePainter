@@ -167,7 +167,14 @@ export type Moment = {
   createTime: number
   authorId: string
   refMomentId: string
+  /** content.media.images：正文配图 */
   images: Image[]
+  /** content.excerpt：平台给出的摘要，成品帖的简介常常直接在这里 */
+  excerpt: string
+  /** coverImage：图文动态在列表层往往只给这个，取不到 media 时靠它认得出「这条帖子有图」 */
+  cover: string
+  /** moment.hotComment：热门评论，机器人回复与成品帖链接常在这里 */
+  hotCommentLinks: string[]
 }
 
 function parseTime(v: unknown): number {
@@ -190,24 +197,53 @@ function normImg(i: any): Image | null {
   return { originUrl: origin, downloadUrl: download, extra: i.extra }
 }
 
+function pickUrl(v: unknown): string {
+  if (typeof v === 'string') return v
+  if (v && typeof v === 'object') {
+    const o = v as Record<string, unknown>
+    for (const k of ['originUrl', 'downloadUrl', 'url', 'thumbnailUrl', 'src']) {
+      const val = o[k]
+      if (typeof val === 'string' && val) return val
+    }
+  }
+  return ''
+}
+
 function parseMoment(m: any): Moment {
   const content = m?.content ?? {}
-  const raw: any[] = content?.media?.images ?? []
-  const images: Image[] = raw.map(normImg).filter((x): x is Image => !!x)
-  const src = String(content?.source ?? '').trim().toUpperCase()
+  const images: Image[] = []
+  const imgs = content?.media?.images
+  if (Array.isArray(imgs)) {
+    for (const im of imgs) {
+      // 元素可能是 {url} 对象，也可能是裸字符串
+      const img = normImg(im)
+      if (img) images.push(img)
+    }
+  }
+  const hot = m?.hotComment
+  const hotLinks: string[] = []
+  const hotRaw = hot?.links ?? hot?.content?.links
+  if (Array.isArray(hotRaw)) {
+    for (const l of hotRaw) {
+      const u = pickUrl(l)
+      if (u) hotLinks.push(u)
+    }
+  }
   return {
     id: m?.id ?? '',
     title: content?.title ?? '',
     text: content?.text ?? '',
-    source: src,
+    source: String(content?.source ?? '').trim().toUpperCase(),
     createTime: parseTime(m?.createTime),
     authorId: m?.author?.userId ?? '',
-    refMomentId: m?.refMomentId ?? m?.content?.refMomentId ?? '',
-    images
+    refMomentId: m?.refMomentId ?? content?.refMomentId ?? '',
+    images,
+    excerpt: content?.excerpt ?? '',
+    cover: normImg(m?.coverImage)?.originUrl ?? '',
+    hotCommentLinks: hotLinks
   }
 }
 
-/** 取当前账号资料，用于界面上显示昵称。 */
 export async function getMe(): Promise<{ name: string; userId: string }> {
   const r = await call<any>('/moment.v1.UserService/GetMe', { view: 'VIEW_DEFAULT' })
   const b = r?.userBase ?? r?.user ?? {}
@@ -341,6 +377,20 @@ export async function listMyFeeds(pageSize = 20): Promise<Moment[]> {
   return (r.feeds ?? []).map((f) => parseMoment(f?.moment)).filter((m) => m.id)
 }
 
+/** GetFeed 除了 feed，还带 similarMoments，成品帖有时只出现在这里。 */
+export async function getFeedBundle(id: string): Promise<{ moment: Moment | null; similar: Moment[] }> {
+  const r = await call<any>('/moment.v1.FeedService/GetFeed', {
+    feedType: 'FEED_TYPE_MOMENT',
+    feedId: id
+  })
+  const feed = r?.feed ?? {}
+  const moment = feed?.moment ? parseMoment(feed.moment) : null
+  const similar = Array.isArray(r?.similarMoments)
+    ? r.similarMoments.map(parseMoment).filter((m: Moment) => m.id)
+    : []
+  return { moment, similar }
+}
+
 export async function getMoment(id: string): Promise<Moment | null> {
   const r = await call<{ feed?: { moment?: any } }>('/moment.v1.FeedService/GetFeed', {
     feedType: 'FEED_TYPE_MOMENT',
@@ -387,7 +437,11 @@ export function pickResult(
 ): Moment | null {
   return (
     feeds.find(
-      (m) => m.source === AI_SOURCE && m.createTime >= watermark && m.images.length > 0 && !seen.has(m.id)
+      (m) =>
+        m.source === AI_SOURCE &&
+        m.createTime >= watermark &&
+        (m.images.length > 0 || m.cover !== '') &&
+        !seen.has(m.id)
     ) ?? null
   )
 }
@@ -404,7 +458,8 @@ export function pickNewArtifact(
   prompt: string
 ): Moment | null {
   const fresh = feeds.filter(
-    (m) => m.id && m.id !== triggerId && !knownIds.has(m.id) && m.images.length > 0
+    (m) =>
+      m.id && m.id !== triggerId && !knownIds.has(m.id) && (m.images.length > 0 || m.cover !== '')
   )
   if (fresh.length === 0) return null
   const bySource = fresh.find((m) => m.source === AI_SOURCE)
