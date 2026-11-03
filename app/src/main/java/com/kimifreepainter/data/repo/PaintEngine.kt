@@ -194,7 +194,10 @@ class PaintEngine(context: Context) {
                     status = TaskStatus.DOWNLOADING.name,
                     resultMomentId = moment.id,
                     title = moment.title.ifEmpty { null },
-                    description = TextUtil.extractIntro(moment.text, task.prompt).ifEmpty { null }
+                    description = TextUtil.extractIntro(moment.text, task.prompt)
+                        .ifEmpty { moment.excerpt }
+                        .ifEmpty { moment.text.take(200) }
+                        .ifEmpty { null }
                 )
             }
 
@@ -310,12 +313,13 @@ class PaintEngine(context: Context) {
         seen: Set<String>,
         cfg: Settings
     ): KimiApi.Moment? {
+        val prompt = db.tasks().byId(taskId)?.prompt.orEmpty()
         val deadline = System.currentTimeMillis() + cfg.timeoutSec * 1000L
         val interval = cfg.pollIntervalSec * 1000L
         var strikes = 0
         while (System.currentTimeMillis() < deadline) {
             delay(interval)
-            val hit = runCatching { MomentProbe.scan(triggerId, watermark, ownerId, seen) }.getOrNull()
+            val hit = runCatching { MomentProbe.scan(triggerId, prompt, watermark, ownerId, seen) }.getOrNull()
             if (hit != null) return hit
             // 中途被取消
             val cur = db.tasks().byId(taskId) ?: return null

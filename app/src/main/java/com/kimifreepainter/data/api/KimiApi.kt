@@ -28,8 +28,17 @@ object KimiApi {
         /** 引用关系：成品帖会指向触发帖，是最可靠的配对判据 */
         val refMomentId: String,
         val images: List<Image>,
+        /** content.excerpt：平台给出的摘要 */
+        val excerpt: String,
+        /** coverImage：图文动态在列表层往往只给这个，取不到 media 时靠它认得出有图 */
+        val cover: String,
+        /** moment.hotComment 里的链接，机器人回复常在这里 */
+        val hotCommentLinks: List<String>,
         val deleted: Boolean
-    )
+    ) {
+        /** 这条帖子有没有图：正文配图或封面图任一有即可 */
+        val hasImage: Boolean get() = images.isNotEmpty() || cover.isNotEmpty()
+    }
 
     /** 上传结果，字段与 proto 的 ImageInfo 对齐。 */
     data class UploadedImage(
@@ -259,6 +268,41 @@ object KimiApi {
         }
     }
 
+    /** 图片元素可能是 {url} 对象，也可能是裸字符串，两种都要认。 */
+    private fun normImg(i: Any?): Image? {
+        if (i == null) return null
+        if (i is String) return if (i.isEmpty()) null else Image(i, i, 0, 0)
+        val o = i as? JSONObject ?: return null
+        val origin = o.optString("originUrl").ifEmpty {
+            o.optString("origin_url").ifEmpty {
+                o.optString("url").ifEmpty {
+                    o.optString("imageUrl").ifEmpty { o.optString("image_url") }
+                }
+            }
+        }
+        val download = o.optString("downloadUrl").ifEmpty {
+            o.optString("download_url").ifEmpty { o.optString("url").ifEmpty { origin } }
+        }
+        if (origin.isEmpty() && download.isEmpty()) return null
+        val extra = o.optJSONObject("extra")
+        return Image(
+            originUrl = origin,
+            downloadUrl = download,
+            width = extra?.optInt("width", 0) ?: 0,
+            height = extra?.optInt("height", 0) ?: 0
+        )
+    }
+
+    private fun linkUrl(v: Any?): String {
+        if (v is String) return v
+        val o = v as? JSONObject ?: return ""
+        for (k in listOf("url", "linkUrl", "href", "link")) {
+            val s = o.optString(k)
+            if (s.isNotEmpty()) return s
+        }
+        return ""
+    }
+
     private fun parseMoment(m: JSONObject): Moment {
         val content = m.optJSONObject("content")
         val author = m.optJSONObject("author")
@@ -266,21 +310,23 @@ object KimiApi {
         val imgs = content?.optJSONObject("media")?.optJSONArray("images")
         if (imgs != null) {
             for (i in 0 until imgs.length()) {
-                val im = imgs.optJSONObject(i) ?: continue
-                val extra = im.optJSONObject("extra")
-                images += Image(
-                    originUrl = im.optString("originUrl"),
-                    downloadUrl = im.optString("downloadUrl"),
-                    width = extra?.optInt("width", 0) ?: 0,
-                    height = extra?.optInt("height", 0) ?: 0
-                )
+                normImg(imgs.opt(i))?.let { images += it }
+            }
+        }
+        val hotLinks = mutableListOf<String>()
+        val hot = m.optJSONObject("hotComment")
+        val hotArr = hot?.optJSONArray("links") ?: hot?.optJSONObject("content")?.optJSONArray("links")
+        if (hotArr != null) {
+            for (i in 0 until hotArr.length()) {
+                val u = linkUrl(hotArr.opt(i))
+                if (u.isNotEmpty()) hotLinks += u
             }
         }
         return Moment(
             id = m.optString("id"),
             title = content?.optString("title").orEmpty(),
             text = content?.optString("text").orEmpty(),
-            source = content?.optString("source").orEmpty(),
+            source = content?.optString("source").orEmpty().uppercase(),
             refMomentId = m.optString("refMomentId").ifEmpty {
                 content?.optString("refMomentId").orEmpty()
             },
@@ -288,7 +334,28 @@ object KimiApi {
             authorId = author?.optString("userId").orEmpty(),
             authorType = author?.optString("type").orEmpty(),
             images = images,
+            excerpt = content?.optString("excerpt").orEmpty(),
+            cover = normImg(m.opt("coverImage"))?.originUrl.orEmpty(),
+            hotCommentLinks = hotLinks,
             deleted = m.optBoolean("isDeleted", false)
         )
+    }
+
+    /** GetFeed 除 feed 外还带 similarMoments，成品帖有时只出现在这里。 */
+    suspend fun getFeedBundle(momentId: String): Pair<Moment?, List<Moment>> {
+        val r = ApiClient.post(
+            "/moment.v1.FeedService/GetFeed",
+            JSONObject().put("feedType", "FEED_TYPE_MOMENT").put("feedId", momentId)
+        )
+        val feed = r.optJSONObject("feed")
+        val moment = feed?.optJSONObject("moment")?.let { parseMoment(it) }
+        val similar = mutableListOf<Moment>()
+        val arr = r.optJSONArray("similarMoments")
+        if (arr != null) {
+            for (i in 0 until arr.length()) {
+                arr.optJSONObject(i)?.let { similar += parseMoment(it) }
+            }
+        }
+        return moment to similar
     }
 }

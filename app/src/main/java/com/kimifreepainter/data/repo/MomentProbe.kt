@@ -3,15 +3,18 @@ package com.kimifreepainter.data.repo
 import com.kimifreepainter.data.api.KimiApi
 
 /**
- * 成品帖识别。四条判据依次尝试，任何一条命中即返回：
+ * 成品帖识别。五条判据依次尝试，任何一条命中即返回。
  *
- * 1. 列表里出现 refMomentId == 触发帖的动态（成品帖引用触发帖，最直接）
- * 2. 列表里新出现、带图、来源为 AI 的动态
- * 3. 列表不带图时，对每个新动态回查详情再看图
- * 4. 触发帖评论区里机器人回复的 links（富文本链接，正文里没有 URL）
+ * 关键点：不能只认「content.media.images 里有图」。
+ * 图文动态在列表层往往只给 coverImage，取不到 media 时候选集就是空的——
+ * 这正是带图触发时明明有成品帖却认不出来的原因。
+ * 所以「有图」= 正文配图 或 封面图 任一非空。
  *
- * 不再单靠 content.source：该字段在部分帖子上为空，会把成品帖整体漏掉。
- * author 只用来排除他人动态——成品帖的 author 就是发起人自己。
+ * 1. 引用关系：成品帖引用触发帖，或触发帖反过来引用成品帖
+ * 2. 新出现且有图的帖（来源为 AI 优先）
+ * 3. 新帖回查详情：有图 / 来源是 AI / 正文引用了本次提示词，都算
+ * 4. 触发帖评论里机器人回复的链接（富文本 links，正文里没有 URL）
+ * 5. GetFeed 的 similarMoments，成品帖有时只出现在这里
  */
 object MomentProbe {
 
@@ -19,6 +22,7 @@ object MomentProbe {
 
     suspend fun scan(
         triggerId: String,
+        prompt: String,
         watermark: Long,
         ownerId: String,
         seen: Set<String>
@@ -31,23 +35,38 @@ object MomentProbe {
                 (ownerId.isEmpty() || m.authorId.isEmpty() || m.authorId == ownerId) &&
                 (watermark <= 0 || m.createTime <= 0 || m.createTime >= watermark - 120)
         }
+        val head = prompt.trim().take(12)
 
-        // 判据 1：引用关系
-        mine.firstOrNull { it.refMomentId.isNotEmpty() && it.refMomentId == triggerId }
-            ?.let { return it }
+        // 判据一：引用关系，两个方向都查
+        mine.firstOrNull { it.refMomentId.isNotEmpty() && it.refMomentId == triggerId }?.let { return it }
+        feeds.firstOrNull { it.id == triggerId }?.refMomentId
+            ?.takeIf { it.isNotEmpty() && it != triggerId }
+            ?.let { back ->
+                runCatching { KimiApi.getMoment(back) }.getOrNull()?.let { return it }
+            }
 
-        // 判据 2：AI 来源且带图
-        mine.firstOrNull { it.source == AI_SOURCE && it.images.isNotEmpty() }?.let { return it }
+        // 判据二：AI 来源且有图
+        mine.firstOrNull { it.source == AI_SOURCE && it.hasImage }?.let { return it }
 
-        // 判据 3：新帖回查详情
+        // 判据三：新帖回查详情
         for (cand in mine) {
-            val detail = runCatching { KimiApi.getMoment(cand.id) }.getOrNull() ?: continue
-            if (detail.images.isNotEmpty()) return detail
+            val d = runCatching { KimiApi.getMoment(cand.id) }.getOrNull() ?: continue
+            if (d.hasImage || d.source == AI_SOURCE || (head.length >= 4 && d.text.contains(head))) {
+                return d
+            }
+        }
+
+        // 判据五：similarMoments
+        val bundle = runCatching { KimiApi.getFeedBundle(triggerId) }.getOrNull()
+        if (bundle != null) {
+            val pool = bundle.second + listOfNotNull(bundle.first)
+            pool.firstOrNull { it.id != triggerId && (it.hasImage || it.source == AI_SOURCE) }
+                ?.let { return it }
         }
         return null
     }
 
-    /** 兜底：评论区机器人回复。链接在 links 里，正文只有「查看」两个字的显示文本。 */
+    /** 兜底：评论区机器人回复与热门评论里的链接。链接在 links 里，正文只有显示文本。 */
     suspend fun viaComments(
         triggerId: String,
         ownerId: String,
@@ -56,12 +75,25 @@ object MomentProbe {
         val comments = runCatching { KimiApi.listComments(triggerId, 20) }.getOrNull().orEmpty()
         for (reply in comments) {
             if (reply.type != "COMMENT_TYPE_BOT" && !reply.aiGenerated) continue
-            for (src in reply.links + reply.text) {
-                for (id in extractMomentIds(src)) {
-                    if (id == triggerId || id in seen) continue
-                    val m = runCatching { KimiApi.getMoment(id) }.getOrNull() ?: continue
-                    if (m.images.isNotEmpty() || m.source == AI_SOURCE) return m
-                }
+            val found = fromLinks(reply.links + reply.text, triggerId, seen)
+            if (found != null) return found
+        }
+        // 触发帖自带的热门评论里也可能有机器人回复
+        val bundle = runCatching { KimiApi.getFeedBundle(triggerId) }.getOrNull()
+        val hot = bundle?.first?.hotCommentLinks.orEmpty()
+        return fromLinks(hot, triggerId, seen)
+    }
+
+    private suspend fun fromLinks(
+        sources: List<String>,
+        triggerId: String,
+        seen: Set<String>
+    ): KimiApi.Moment? {
+        for (src in sources) {
+            for (id in extractMomentIds(src)) {
+                if (id == triggerId || id in seen) continue
+                val m = runCatching { KimiApi.getMoment(id) }.getOrNull() ?: continue
+                if (m.hasImage || m.source == AI_SOURCE) return m
             }
         }
         return null
