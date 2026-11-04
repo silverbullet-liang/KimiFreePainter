@@ -20,7 +20,7 @@
 | 维度 | Android 端 | Web 端 |
 |---|---|---|
 | 部署 | GitHub Release（APK） | GitHub Pages |
-| 登录 | WebView 自动读 localStorage | 手动粘贴 token |
+| 登录 | 扫码（App 内生成二维码，轮询 auth 网关） | 扫码（同一套网关，浏览器内轮询） |
 | Token 存储 | EncryptedSharedPreferences | localStorage（默认临时会话） |
 | 后台任务 | Foreground Service | 无 |
 | 自动删帖 | ✅ 可配置 | ❌ 手动 |
@@ -217,9 +217,9 @@ Vite 5 + React 18 + TypeScript + Zustand + HashRouter + 纯 CSS + IndexedDB/loca
 
 ### 4.3 Token 处理
 
-- 获取：Bookmarklet 一键提取到剪贴板
-- 存储：默认临时会话（内存），可选 localStorage（显著警告）
-- 刷新：401 时调 RefreshToken，成功覆盖重放
+- 获取：扫码登录（`auth.kimi.com` 网关，免鉴权申请登录码 → 轮询状态 → 服务端下发令牌）
+- 存储：localStorage，仅本机
+- 刷新：每 60 秒检查 access 是否过期，过期用 refreshToken 换新；401 时也会即时刷新并重放
 
 ### 4.4 创作流程
 

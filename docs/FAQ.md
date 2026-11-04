@@ -17,14 +17,17 @@ A: 因为 `@AI画师` 是 Kimi 社区里该 bot 的**唯一名称**，是中文�
 
 ## 关于登录
 
+**Q: 登录要做什么？**
+A: 只有一件事：用 Kimi App 扫一下二维码。两端都在本地生成二维码并向 `auth.kimi.com` 轮询状态，令牌由服务端直接下发，不经过任何中转。没有手填令牌的入口——那对不懂技术的用户既不友好也有泄露风险。
+
 **Q: Android 端登录后为什么不用重登？**
-A: Token 使用 EncryptedSharedPreferences 加密持久化。accessToken 15 分钟过期时，自动用 refreshToken 静默续期；refreshToken 90 天过期时，后台 WebView 会 reload kimi.com 自动恢复。
+A: Token 使用 EncryptedSharedPreferences 加密持久化。accessToken 过期时自动用 refreshToken 静默续期。
 
-**Q: Web 端为什么每次都要重新填 token？**
-A: 浏览器无法跨域读取 kimi.com 的 localStorage。默认「临时会话」模式，刷新页面即清。如果开启「记住 token」，token 会明文存 localStorage，安全性较低。
+**Q: Web 端的登录状态怎么保持？**
+A: 令牌只存本机 localStorage。每 60 秒检查一次 access 是否过期，过期就用 refreshToken 换新；换不上判定掉线，界面立刻反映。
 
-**Q: Token 过期了怎么办？**
-A: 自动刷新（用 refreshToken 换新 accessToken）；刷新失败时用后台 WebView 兜底；兜底失败时弹窗引导手动登录。
+**Q: 二维码扫完没反应？**
+A: 先看二维码下的状态文案：卡片显示「已扫码，请在手机上确认」说明扫描成功，只差手机上点确认；一直停在「请用 Kimi App 扫描二维码」说明扫描没被识别，点「刷新二维码」重来；显示「二维码已过期」就直接刷新。
 
 ## 关于生图
 

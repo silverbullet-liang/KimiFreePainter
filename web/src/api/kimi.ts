@@ -168,6 +168,8 @@ export type Moment = {
   authorId: string
   refMomentId: string
   images: Image[]
+  /** content.excerpt：平台摘要，正文剥不出简介时用它 */
+  excerpt: string
 }
 
 function parseTime(v: unknown): number {
@@ -203,7 +205,8 @@ function parseMoment(m: any): Moment {
     createTime: parseTime(m?.createTime),
     authorId: m?.author?.userId ?? '',
     refMomentId: m?.refMomentId ?? m?.content?.refMomentId ?? '',
-    images
+    images,
+    excerpt: content?.excerpt ?? ''
   }
 }
 

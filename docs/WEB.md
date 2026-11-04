@@ -9,7 +9,7 @@ https://silverbullet-liang.github.io/KimiFreePainter/
 
 | 功能 | Android | Web |
 |---|---|---|
-| 获取 token | WebView 自动 | 手动粘贴（Bookmarklet 辅助） |
+| 登录 | 扫码 | 扫码（同一套 auth 网关） |
 | 后台运行 | ✅ | ❌ 需保持页面打开 |
 | 自动删帖 | ✅ 可配置 | ❌ 手动 |
 | 相册保存 | ✅ | 浏览器下载 |
@@ -17,27 +17,13 @@ https://silverbullet-liang.github.io/KimiFreePainter/
 
 ## 快速开始
 
-### 1. 获取 Token（Bookmarklet）
+### 1. 扫码登录
 
-1. 浏览器打开 https://www.kimi.com 并登录
-2. 新建书签，名称「Kimi Token」，URL 填入下面这段：
+1. 打开设置页 → 扫码登录
+2. 用 Kimi App 扫描二维码，手机上点确认
+3. 状态变成「登录成功」即完成，令牌自动写入本机
 
-```
-javascript:(function(){
-  const at = localStorage.getItem('access_token');
-  const rt = localStorage.getItem('refresh_token');
-  if (!at || !rt) { alert('未找到 token，请先在 kimi.com 登录'); return; }
-  const payload = JSON.stringify({ accessToken: at, refreshToken: rt });
-  navigator.clipboard.writeText(payload).then(() => {
-    alert('✅ Token 已复制到剪贴板\n\n回到 KimiFreePainter，粘贴到设置页');
-  }).catch(() => {
-    prompt('复制以下内容到 KimiFreePainter:', payload);
-  });
-})();
-```
-
-3. 在 kimi.com 页面点击该书签，token 会复制到剪贴板
-4. 回到 KimiFreePainter → 设置页 → 粘贴 → 保存
+没有 token 输入框，也不需要开发者工具。二维码内容与官网一致：`https://www.kimi.com/wechat/mp/auth?id=<code>&device_id=<webId>`。
 
 ### 2. 生图
 

@@ -35,6 +35,7 @@ type Record = {
   title: string
   caption: string
   raw?: string
+  excerpt?: string
   images: string[]
   at: number
   triggerId: string
@@ -45,7 +46,7 @@ const HIST = 'kfp_history'
 
 /** 算法更新后旧记录也能重新解析：有原文就现算，没有才用当时存的。标题已在正文里时去重。 */
 function captionOf(r: Record): string {
-  const c = r.raw ? extractIntro(r.raw, r.prompt) : r.caption
+  const c = r.raw ? extractIntro(r.raw, r.prompt) || r.excerpt || '' : r.caption
   if (r.title && c.startsWith(r.title)) return c.slice(r.title.length).replace(/^[\s:：]+/, '')
   return c
 }
@@ -297,8 +298,9 @@ export default function App() {
         id: hit.id,
         prompt: text,
         title: hit.title,
-        caption: extractIntro(hit.text, text),
+        caption: extractIntro(hit.text, text) || hit.excerpt || '',
         raw: hit.text,
+        excerpt: hit.excerpt,
         images: hit.images.map((i) => i.originUrl || i.downloadUrl),
         at: Date.now(),
         triggerId
