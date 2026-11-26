@@ -1,0 +1,9 @@
+{
+  "name": "免费画师 FreePainter",
+  "short_name": "免费画师",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#F7FAF7",
+  "theme_color": "#3D6B5A",
+  "icons": [{ "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

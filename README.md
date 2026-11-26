@@ -48,6 +48,8 @@
 - 🎨 **Prettier**: rebuilt with classic Material You
 - 📱 **Android**: QR sign-in + image-to-image + background wait + gallery save + double-tap to check updates
 - 🌐 **Web**: live demo on GitHub Pages, QR sign-in
+- 🖼️ **Three modes**: image generation, multi-panel comic (auto-stitched long image), watermark removal by prompt-based redraw
+- 📎 **Up to 9 reference images**: accepted in every mode, always one output image
 - 📚 **Full interface research doc**: 69 services / 260 RPCs / 909 messages / 158 enums
 - 🔒 **Privacy first**: data stays local
 

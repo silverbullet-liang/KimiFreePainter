@@ -24,6 +24,7 @@ import {
 } from './api/kimi'
 import QrLogin from './QrLogin'
 import { refreshTokens } from './api/auth'
+import { MODE_LABEL, WM_POSITIONS, cellPrompt, cleanPrompt, stitchComic, type Mode } from './modes'
 
 declare const __APP_VERSION__: string
 
@@ -39,6 +40,8 @@ type Record = {
   images: string[]
   at: number
   triggerId: string
+  triggerIds?: string[]
+  cells?: number
   cleaned?: boolean
 }
 
@@ -62,6 +65,15 @@ function loadHistory(): Record[] {
 export default function App() {
   const [tab, setTab] = useState<Tab>('paint')
   const [prompt, setPrompt] = useState('')
+  const [mode, setMode] = useState<Mode>('normal')
+  const [comicCount, setComicCount] = useState(4)
+  const [comicBg, setComicBg] = useState('')
+  const [comicStyle, setComicStyle] = useState('')
+  const [cells, setCells] = useState<string[]>(['', '', '', ''])
+  const [wmPos, setWmPos] = useState('左上角')
+  const [wmCustom, setWmCustom] = useState('')
+  const [wmCustomOn, setWmCustomOn] = useState(false)
+  const [wmText, setWmText] = useState('')
   const [status, setStatus] = useState<Status>('idle')
   const [waited, setWaited] = useState(0)
   const [error, setError] = useState('')
@@ -75,8 +87,8 @@ export default function App() {
   const [poll, setPoll] = useState(() => Number(localStorage.getItem('kfp_poll') || 10))
   const [openId, setOpenId] = useState<string | null>(null)
   const [nick, setNick] = useState(() => localStorage.getItem('kfp_nick') || '')
-  const [pick, setPick] = useState<File | null>(null)
-  const [pickUrl, setPickUrl] = useState('')
+  const [picks, setPicks] = useState<{ file: File; url: string }[]>([])
+  const [cellUrls, setCellUrls] = useState<string[]>([])
   const timer = useRef<number | null>(null)
   const stopRef = useRef(false)
 
@@ -119,7 +131,17 @@ export default function App() {
   }, [status])
 
   useEffect(() => {
-    localStorage.setItem(HIST, JSON.stringify(history.slice(0, 40)))
+    // 漫画长图是 dataURL，体积大：超限就少存几条，不能让整个应用崩掉
+    let list = history.slice(0, 40)
+    for (;;) {
+      try {
+        localStorage.setItem(HIST, JSON.stringify(list))
+        return
+      } catch {
+        if (list.length <= 2) return
+        list = list.slice(0, Math.max(2, Math.floor(list.length / 2)))
+      }
+    }
   }, [history])
 
   /** 双击版本号：比对 GitHub 最新 Release。网页版刷新即更新，APK 另给下载地址。 */
@@ -151,185 +173,165 @@ export default function App() {
     }
   }
 
+  /** 单次生图：上传参考图 → 发帖 → 回查 → 轮询命中。输出永远只取第一张。 */
+  async function runOnce(
+    text: string,
+    refs: File[],
+    botId: string,
+    botName: string,
+    knownIds: Set<string>,
+    watermark: number
+  ): Promise<Record> {
+    const uploaded: UploadedImage[] = []
+    for (const f of refs.slice(0, 9)) {
+      try {
+        uploaded.push(await uploadImage(f))
+      } catch (e) {
+        setWarn((w) => w || `有参考图上传失败：${(e as Error).message}，本次按已成功的图片继续。`)
+      }
+    }
+
+    let triggerId = ''
+    try {
+      triggerId = await createMoment(text, botId, botName, uploaded)
+    } catch (e) {
+      if (!uploaded.length) throw e
+      setWarn('带参考图发帖被拒，已按纯文字重试。')
+      triggerId = await createMoment(text, botId, botName, null)
+    }
+    if (!triggerId) throw new Error('发帖没有返回动态 ID')
+
+    let self = await getMoment(triggerId).catch(() => null)
+    for (let i = 0; i < 2 && (!self || !self.id); i++) {
+      await sleep(1500)
+      self = await getMoment(triggerId).catch(() => null)
+    }
+    if (!self || !self.id) throw new Error('动态没有发布成功：平台查不到这条动态，可能被拦截或账号受限')
+    if (self.text && !self.text.includes('@')) throw new Error('动态发出去了，但正文里的 @ 没生效，画师收不到，请重试')
+    if (uploaded.length && self.images.length === 0) setWarn('图片没有随动态发出，本次按纯文字生成。')
+
+    knownIds.add(triggerId)
+    setStatus('waiting')
+    const deadline = Date.now() + 300_000
+    let hit: Moment | null = null
+    let diag = ''
+    while (Date.now() < deadline) {
+      await sleep(Math.max(8, poll) * 1000)
+      if (stopRef.current) throw new Error('已停止等待（触发帖不会被删除）')
+      const feeds = await listMyFeeds(20)
+      diag = `抓到 ${feeds.length} 条 / 带图 ${feeds.filter((x) => x.images.length > 0).length} 条 / AI来源 ${feeds.filter((x) => x.source === AI_SOURCE).length} 条`
+      hit = (feeds.find((x) => x.refMomentId && x.refMomentId === triggerId) ?? null) ||
+        pickNewArtifact(feeds, triggerId, knownIds, text) || pickResult(feeds, watermark, knownIds)
+      if (hit) break
+      const fresh = feeds.filter((x) => x.id !== triggerId && !knownIds.has(x.id))
+      for (const cand of fresh) {
+        const detail = await getMoment(cand.id).catch(() => null)
+        if (detail && detail.images.length > 0) { hit = detail; break }
+      }
+      if (hit) break
+      const cs = await listComments(triggerId).catch(() => [])
+      const reply = cs.find((c) => c.type === 'COMMENT_TYPE_BOT' || c.aiGenerated)
+      if (reply) {
+        for (const u of [...reply.links, reply.text]) {
+          for (const id of extractMomentIds(u)) {
+            const m = await getMoment(id).catch(() => null)
+            if (m && (m.images.length > 0 || m.source === AI_SOURCE)) { hit = m; break }
+          }
+          if (hit) break
+        }
+      }
+      if (hit) break
+    }
+    if (!hit) throw new Error(`等待超时。诊断：${diag}`)
+
+    return {
+      id: hit.id,
+      prompt: text,
+      title: hit.title,
+      caption: extractIntro(hit.text, text) || hit.excerpt || '',
+      raw: hit.text,
+      excerpt: hit.excerpt,
+      images: hit.images.map((i) => i.originUrl || i.downloadUrl).slice(0, 1),
+      at: Date.now(),
+      triggerId
+    }
+  }
+
   async function start() {
     const text = prompt.trim()
-    if (!text || status === 'posting' || status === 'waiting') return
-    if (!logged) {
-      setError('请先在设置页扫码登录')
-      setTab('settings')
-      return
+    if (status === 'posting' || status === 'waiting') return
+    if (mode === 'normal' && !text) return
+    if (mode === 'clean' && !wmText.trim()) { setError('请填写水印内容'); return }
+    if (mode === 'comic' && cells.filter((c) => c.trim()).length !== comicCount) {
+      setError(`请填满 ${comicCount} 格的提示词`); return
     }
-    setError('')
-    setWarn('')
-    setResult(null)
-    stopRef.current = false
-    setWaited(0)
-    setStatus('posting')
+    if (!logged) { setError('请先在设置页扫码登录'); setTab('settings'); return }
+    setError(''); setWarn(''); setResult(null); setCellUrls([])
+    stopRef.current = false; setWaited(0); setStatus('posting')
     try {
-      // 机器人列表拿不到也不阻断：正文里的 @ 才是真正触发的那一环
       const bots = await listBots().catch(() => [])
       const AI_BOT = 'AI画师'
-      const bot =
-        bots.find((b) => b.name.replace(/\s+/g, '') === AI_BOT) ??
-        bots.find((b) => b.name.includes('画师'))
+      const bot = bots.find((b) => b.name.replace(/\s+/g, '') === AI_BOT) ?? bots.find((b) => b.name.includes('画师'))
       const botId = bot?.userId ?? ''
-
-      // 发帖前先记下当前已存在的全部动态 id，之后只认「新出现的」
       const before = await listMyFeeds(20)
       const knownIds = new Set(before.map((m) => m.id))
-      history.forEach((h) => knownIds.add(h.id))
+      history.forEach((h) => knownIds.add(h.triggerId))
       const watermark = before.reduce((m, x) => Math.max(m, x.createTime), 0)
+      const refs = picks.map((p) => p.file)
 
-      // 带图即改图：一条动态只吃一张，平台侧限制。
-      // 上传失败不阻塞：降级为纯文字发出，把原因写在界面上，而不是让按钮点了没反应。
-      let image: UploadedImage | null = null
-      if (pick) {
+      let record: Record
+      const triggerIds: string[] = []
+      if (mode === 'comic') {
+        const parts: Record[] = []
+        for (let i = 0; i < comicCount; i++) {
+          if (stopRef.current) throw new Error('已停止等待（已发布的触发帖不会被删除）')
+          setWaited(0)
+          const p = cellPrompt(comicBg, comicStyle, cells[i], i, comicCount)
+          const r = await runOnce(p, refs, botId, bot?.name ?? AI_BOT, knownIds, watermark)
+          parts.push(r)
+          triggerIds.push(r.triggerId)
+          setCellUrls((u) => [...u, r.images[0] || ''])
+          setStatus('posting')
+        }
+        const urls = parts.map((p) => p.images[0]).filter(Boolean)
+        let stitched = ''
         try {
-          image = await uploadImage(pick)
+          stitched = await stitchComic(urls)
         } catch (e) {
-          setWarn(`图片没能上传：${(e as Error).message}。本次按纯文字发出。`)
+          setWarn(`长图拼接失败（${(e as Error).message}），已保留逐格图片。`)
         }
-      }
-
-      let triggerId = ''
-      try {
-        triggerId = await createMoment(text, botId, AI_BOT, image)
-      } catch (e) {
-        if (!image) throw e
-        setWarn(`带图发帖被拒（${(e as Error).message}），已按纯文字重试。`)
-        image = null
-        triggerId = await createMoment(text, botId, AI_BOT, null)
-      }
-      if (!triggerId) throw new Error('发帖没有返回动态 ID')
-
-      // 回查确认：接口给了 id 不代表动态真的存在（可能被风控吞掉）。
-      // 查不到就当场失败，不能让界面一直停在「画师正在创作」。
-      let self = await getMoment(triggerId).catch(() => null)
-      for (let i = 0; i < 2 && (!self || !self.id); i++) {
-        await sleep(1500)
-        self = await getMoment(triggerId).catch(() => null)
-      }
-      if (!self || !self.id) {
-        throw new Error('动态没有发布成功：平台查不到这条动态，可能被拦截或账号受限')
-      }
-      if (self.text && !self.text.includes('@')) {
-        throw new Error('动态发出去了，但正文里的 @ 没生效，画师收不到，请重试')
-      }
-      if (image && self.images.length === 0) {
-        setWarn('图片没有随动态发出，本次按纯文字生成。')
-      }
-
-      knownIds.add(triggerId)
-      setStatus('waiting')
-
-      const deadline = Date.now() + 300_000
-      let hit: Moment | null = null
-      let rounds = 0
-      let diag = ''
-      while (Date.now() < deadline) {
-        await sleep(Math.max(8, poll) * 1000)
-        if (stopRef.current) throw new Error('已停止等待（触发帖不会被删除）')
-        rounds++
-        const feeds = await listMyFeeds(20)
-        // 诊断日志：出问题时在控制台能看到每轮抓到了什么
-        console.debug(
-          `[probe ${rounds}]`,
-          feeds.map((f) => ({
-            id: f.id.slice(-6),
-            src: f.source,
-            img: f.images.length,
-            t: f.createTime,
-            known: knownIds.has(f.id)
-          }))
-        )
-        if (rounds <= 3 && !feeds.some((f) => f.id === triggerId)) {
-          console.warn(`[probe] 第 ${rounds} 轮仍看不到刚发布的触发帖，列表可能取不到最新数据`)
+        const base = parts[0]
+        record = {
+          ...base,
+          id: `${base.id}-comic-${Date.now()}`,
+          prompt: `漫画 ${comicCount} 格 · ${comicBg || '背景未指定'} / ${comicStyle || '风格未指定'}`,
+          title: stitched ? '漫画长图' : base.title,
+          caption: stitched ? `共 ${comicCount} 格，已拼接为长图` : base.caption,
+          images: stitched ? [stitched] : urls.slice(0, 1),
+          cells: comicCount,
+          triggerIds
         }
-        const self = feeds.find((f) => f.id === triggerId)
-        if (self && rounds === 1) {
-          console.debug('[probe] 触发帖正文:', self.text)
-        }
-        diag = `抓到 ${feeds.length} 条 / 带图 ${feeds.filter((x) => x.images.length > 0).length} 条 / AI来源 ${
-          feeds.filter((x) => x.source === AI_SOURCE).length
-        } 条 / 含引用 ${feeds.filter((x) => x.refMomentId).length} 条`
-
-        // 判据一：成品帖会带上它引用的动态 id（最直接）
-        hit = feeds.find((x) => x.refMomentId && x.refMomentId === triggerId) ?? null
-        // 判据二：新出现且带图的帖
-        if (!hit) {
-          hit =
-            pickNewArtifact(feeds, triggerId, knownIds, text) ??
-            pickResult(feeds, watermark, knownIds)
-        }
-        if (hit) break
-
-        // 判据三：列表可能不带图，对新出现的帖逐个回查详情
-        const freshAny = feeds.filter((x) => x.id !== triggerId && !knownIds.has(x.id))
-        for (const cand of freshAny) {
-          const detail = await getMoment(cand.id).catch(() => null)
-          if (detail && detail.images.length > 0) {
-            hit = detail
-            break
-          }
-        }
-        if (hit) break
-
-        // 判据四：触发帖下的机器人回复。链接是富文本，URL 在 links 里而不是正文
-        const cs = await listComments(triggerId).catch(() => [])
-        const reply = cs.find((c) => c.type === 'COMMENT_TYPE_BOT' || c.aiGenerated)
-        if (reply) {
-          console.debug('[probe] bot reply', reply.links, reply.text.slice(0, 80))
-          for (const u of [...reply.links, reply.text]) {
-            for (const id of extractMomentIds(u)) {
-              const m = await getMoment(id).catch(() => null)
-              if (m && (m.images.length > 0 || m.source === AI_SOURCE)) {
-                hit = m
-                break
-              }
-            }
-            if (hit) break
-          }
-        }
-        if (hit) break
+      } else {
+        const finalText = mode === 'clean' ? cleanPrompt(wmCustomOn ? wmCustom : wmPos, wmText) : text
+        record = await runOnce(finalText, refs, botId, bot?.name ?? AI_BOT, knownIds, watermark)
+        triggerIds.push(record.triggerId)
       }
-      if (!hit) throw new Error(`等待超时。诊断：${diag}`)
 
-      const record: Record = {
-        id: hit.id,
-        prompt: text,
-        title: hit.title,
-        caption: extractIntro(hit.text, text) || hit.excerpt || '',
-        raw: hit.text,
-        excerpt: hit.excerpt,
-        images: hit.images.map((i) => i.originUrl || i.downloadUrl),
-        at: Date.now(),
-        triggerId
-      }
       setResult(record)
       setHistory((h) => [record, ...h.filter((x) => x.id !== record.id)].slice(0, 40))
       setStatus('done')
-      setPrompt('')
-      setPick(null)
-      setPickUrl('')
-
-      // 清理：立即执行，结果写回本条记录，界面能看到成功与否
+      setPrompt(''); setPicks([]); setWmText('')
       if (clean !== 'none') {
-        const ok = await cleanPosts(triggerId, clean === 'all' ? hit.id : '')
+        const ok = await cleanPosts(triggerIds, mode === 'comic' ? '' : record.id)
         setResult((r) => (r ? { ...r, cleaned: ok } : r))
-        setHistory((list) =>
-          list.map((x) => (x.id === record.id ? { ...x, cleaned: ok } : x))
-        )
+        setHistory((l) => l.map((x) => (x.id === record.id ? { ...x, cleaned: ok } : x)))
       }
     } catch (e) {
       setStatus('failed')
       const err = e as ApiError
-      setError(
-        err.code === 401
-          ? '登录态已失效，请重新填写'
-          : err.code === 429
-            ? '请求太频繁，请稍后再试'
-            : err.message || '出现问题，请稍后重试'
-      )
+      setError(err.code === 401 ? '登录态已失效，请重新扫码登录'
+        : err.code === 429 ? '请求太频繁，请稍后再试'
+        : err.message || '出现问题，请稍后重试')
     }
   }
 
@@ -349,123 +351,158 @@ export default function App() {
       <main>
         {tab === 'paint' && (
           <>
-            <div className="field">
-              <textarea
-                value={prompt}
-                onChange={(e) => {
-                  setPrompt(e.target.value)
-                  // 长提示词自动撑高，超出视口后再内部滚动
-                  const el = e.currentTarget
-                  el.style.height = 'auto'
-                  el.style.height = `${el.scrollHeight}px`
-                }}
-                placeholder="描述你想要的画面"
-                rows={5}
-              />
-              <div className="counter">{prompt.length} 字</div>
+            <div className="modes">
+              {(['normal', 'comic', 'clean'] as Mode[]).map((m) => (
+                <button key={m} className={mode === m ? 'on' : ''} onClick={() => { setMode(m); setError(''); setResult(null) }}>{MODE_LABEL[m]}</button>
+              ))}
             </div>
+
+            {mode === 'normal' && (
+              <div className="field">
+                <textarea
+                  value={prompt}
+                  onChange={(e) => {
+                    setPrompt(e.target.value)
+                    const el = e.currentTarget
+                    el.style.height = 'auto'
+                    el.style.height = `${el.scrollHeight}px`
+                  }}
+                  placeholder="描述你想要的画面"
+                  rows={5}
+                />
+                <div className="counter">{prompt.length} 字</div>
+              </div>
+            )}
+
+            {mode === 'comic' && (
+              <>
+                <div className="field row-field">
+                  <label>漫画格数</label>
+                  <div className="stepper">
+                    <button aria-label="减少" onClick={() => {
+                      const n = Math.max(1, comicCount - 1)
+                      setComicCount(n); setCells((c) => c.slice(0, n).concat(Array(n - Math.min(c.length, n)).fill('')))
+                    }}>−</button>
+                    <b>{comicCount}</b>
+                    <button aria-label="增加" onClick={() => {
+                      const n = Math.min(9, comicCount + 1)
+                      setComicCount(n); setCells((c) => c.concat(Array(n - c.length).fill('')))
+                    }}>+</button>
+                  </div>
+                </div>
+                <div className="field"><input value={comicBg} onChange={(e) => setComicBg(e.target.value)} placeholder="统一背景（每格自动附加）" /></div>
+                <div className="field"><input value={comicStyle} onChange={(e) => setComicStyle(e.target.value)} placeholder="统一风格（每格自动附加）" /></div>
+                {cells.slice(0, comicCount).map((c, i) => (
+                  <div className="field" key={i}>
+                    <label>第 {i + 1} 格</label>
+                    <textarea rows={2} value={c} placeholder="这一格画什么" onChange={(e) => setCells((list) => list.map((x, k) => k === i ? e.target.value : x))} />
+                  </div>
+                ))}
+              </>
+            )}
+
+            {mode === 'clean' && (
+              <>
+                <div className="field">
+                  <label>水印位置</label>
+                  <div className="wm-pos">
+                    {!wmCustomOn ? (
+                      <>
+                        <div className="chips">
+                          {WM_POSITIONS.map((p) => (
+                            <button key={p.value} className={wmPos === p.value ? 'on' : ''} onClick={() => {
+                              if (p.value === 'custom') { setWmCustomOn(true); return }
+                              setWmPos(p.value)
+                            }}>{p.label}</button>
+                          ))}
+                        </div>
+                        <button className="arrow" aria-label="自定义位置" onClick={() => setWmCustomOn(true)}>→</button>
+                      </>
+                    ) : (
+                      <>
+                        <input value={wmCustom} onChange={(e) => setWmCustom(e.target.value)} placeholder="例如：右下角半透明文字" />
+                        <button className="arrow" aria-label="展开位置选择" onClick={() => setWmCustomOn(false)}>←</button>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <div className="field"><input value={wmText} onChange={(e) => setWmText(e.target.value)} placeholder="水印内容" /></div>
+                <p className="hint">通过提示词让画师重绘一张无水印图，不调用任何去水印接口。</p>
+              </>
+            )}
 
             <div className="picker">
               <label className="pick-btn">
                 <input
                   type="file"
                   accept="image/*"
+                  multiple
                   onChange={(e) => {
-                    const f = e.target.files?.[0] ?? null
+                    const files = Array.from(e.target.files ?? [])
                     e.target.value = ''
-                    if (!f) return
-                    if (pickUrl) URL.revokeObjectURL(pickUrl)
-                    setPick(f)
-                    setPickUrl(URL.createObjectURL(f))
+                    if (!files.length) return
+                    const room = 9 - picks.length
+                    if (room <= 0) { setWarn('最多 9 张参考图'); return }
+                    if (files.length > room) setWarn(`最多 9 张，已取前 ${room} 张`)
+                    setPicks((old) => [...old, ...files.slice(0, room).map((file) => ({ file, url: URL.createObjectURL(file) }))])
                   }}
                 />
                 <ImageIcon />
-                添加图片（改图）
+                添加参考图（{picks.length}/9）
               </label>
-              {pickUrl && (
-                <div className="pick-prev">
-                  <img src={pickUrl} alt="" draggable={false} />
-                  <button
-                    className="icon"
-                    aria-label="移除图片"
-                    onClick={() => {
-                      URL.revokeObjectURL(pickUrl)
-                      setPick(null)
-                      setPickUrl('')
-                    }}
-                  >
-                    <Trash />
-                  </button>
+              {picks.map((p, i) => (
+                <div className="pick-prev" key={p.url}>
+                  <img src={p.url} alt="" draggable={false} />
+                  <button className="icon" aria-label="移除图片" onClick={() => {
+                    URL.revokeObjectURL(p.url)
+                    setPicks((list) => list.filter((_, k) => k !== i))
+                  }}><Trash /></button>
                 </div>
-              )}
+              ))}
             </div>
 
-            <button className="primary" onClick={start} disabled={!prompt.trim() || status === 'posting' || status === 'waiting'}>
+            <button className="primary" onClick={start} disabled={
+              (mode === 'normal' && !prompt.trim()) ||
+              (mode === 'clean' && !wmText.trim()) ||
+              status === 'posting' || status === 'waiting'
+            }>
               {status === 'posting' ? '正在提交' : status === 'waiting' ? '画师正在创作' : '开始创作'}
             </button>
 
             {(status === 'posting' || status === 'waiting') && (
               <div className="card running">
                 <span className="pulse" />
-                <span>{status === 'posting' ? '正在提交…' : `画师正在创作… 已等待 ${waited} 秒`}</span>
+                <span>{mode === 'comic' && cellUrls.length ? `第 ${Math.min(cellUrls.length + 1, comicCount)} / ${comicCount} 格 · ` : ''}{status === 'posting' ? '正在提交…' : `画师正在创作… 已等待 ${waited} 秒`}</span>
                 <button className="ghost small" onClick={() => { stopRef.current = true }}>停止</button>
               </div>
             )}
-
-            {warn && (
-              <div className="card warn">
-                <strong>提示</strong>
-                <span>{warn}</span>
+            {mode === 'comic' && cellUrls.length > 0 && (
+              <div className="cells">
+                {cellUrls.map((u, i) => u ? <img key={i} src={u} alt={`第 ${i + 1} 格`} referrerPolicy="no-referrer" /> : null)}
               </div>
             )}
 
-            {error && (
-              <div className="card err">
-                <strong>没能完成</strong>
-                <span>{error}</span>
-              </div>
-            )}
+            {warn && <div className="card warn"><strong>提示</strong><span>{warn}</span></div>}
+            {error && <div className="card err"><strong>没能完成</strong><span>{error}</span></div>}
 
             {result && (
               <div className="card result">
                 {result.images.map((src) => (
-                  <img
-                    key={src}
-                    src={src}
-                    alt={result.title || captionOf(result)}
-                    referrerPolicy="no-referrer"
-                  />
+                  <img key={src} src={src} alt={result.title || captionOf(result)} referrerPolicy={src.startsWith('blob:') ? undefined : 'no-referrer'} />
                 ))}
                 {result.title && <p className="title">{result.title}</p>}
                 {captionOf(result) && <p className="caption">{captionOf(result)}</p>}
                 {result.cleaned !== undefined && (
-                  <p className="hint">
-                    {result.cleaned ? '社区帖子已清理' : '帖子清理失败，可在历史里重试'}
-                  </p>
+                  <p className="hint">{result.cleaned ? '社区帖子已清理' : '帖子清理失败，可在历史里重试'}</p>
                 )}
                 <div className="row">
-                  <a
-                    className="primary ghost"
-                    href={result.images[0]}
-                    download
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    保存图片
-                  </a>
-                  <button
-                    className="ghost"
-                    onClick={async () => {
-                      if (!window.confirm('删除后社区里的图片将无法访问。是否同时删除触发帖与作品帖？')) return
-                      const ok = await cleanPosts(result.triggerId, result.id)
-                      setResult({ ...result, cleaned: ok })
-                      setHistory((l) =>
-                        l.map((x) => (x.id === result.id ? { ...x, cleaned: ok } : x))
-                      )
-                    }}
-                  >
-                    删除社区帖
-                  </button>
+                  <a className="primary ghost" href={result.images[0]} download target="_blank" rel="noreferrer">保存图片</a>
+                  <button className="ghost" onClick={async () => {
+                    if (!window.confirm('删除后社区里的图片将无法访问。是否同时删除触发帖与作品帖？')) return
+                    const ok = await cleanPosts(result.triggerIds ?? [result.triggerId], result.id)
+                    setResult({ ...result, cleaned: ok })
+                    setHistory((l) => l.map((x) => ({ ...x, cleaned: ok })))
+                  }}>删除社区帖</button>
                 </div>
               </div>
             )}
@@ -473,7 +510,7 @@ export default function App() {
             {!result && status === 'idle' && (
               <div className="empty">
                 <Brush />
-                <p>输入提示词，画师会为你开始创作</p>
+                <p>{MODE_LABEL[mode]}：选好方式，画师会为你创作</p>
                 <small>生图由平台服务端完成，本页只负责触发与取回</small>
               </div>
             )}
@@ -644,11 +681,12 @@ function sleep(ms: number) {
 }
 
 /** 删帖：返回是否全部成功。结果页与历史详情都复用这一处。 */
-async function cleanPosts(triggerId: string, resultId?: string): Promise<boolean> {
+async function cleanPosts(triggerIds: string | string[], resultId?: string): Promise<boolean> {
   let ok = true
-  if (triggerId) {
+  for (const id of Array.isArray(triggerIds) ? triggerIds : [triggerIds]) {
+    if (!id) continue
     try {
-      await deleteMoment(triggerId)
+      await deleteMoment(id)
     } catch {
       ok = false
     }

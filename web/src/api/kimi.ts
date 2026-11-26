@@ -232,7 +232,7 @@ export async function createMoment(
   prompt: string,
   botId: string,
   botName: string,
-  image?: UploadedImage | null
+  image?: UploadedImage | UploadedImage[] | null
 ): Promise<string> {
   const mention = `@${botName}`
   // 平台靠正文里的 @ 文本定位目标：只发 mentions 字段不会在动态里出现 @，
@@ -244,14 +244,16 @@ export async function createMoment(
   }
   // 拿不到机器人 userId 时只发正文 @：多一个空 id 反而可能被判参数非法
   if (botId) body.mentions = [{ userId: botId, name: botName }]
-  // 带图即改图：图片随动态发出，画师以它为底图重绘。平台一条动态只吃一张。
-  // images 的元素是 ImageInfo，带上 originUrl/thumbnailUrl/extra 才算完整对象。
-  if (image) {
-    const info: { [k: string]: unknown } = { fileId: image.fileId }
-    if (image.originUrl) info.originUrl = image.originUrl
-    if (image.thumbnailUrl) info.thumbnailUrl = image.thumbnailUrl
-    if (image.width && image.height) info.extra = { width: image.width, height: image.height }
-    body.images = [info]
+  // images 是 repeated ImageInfo：最多 9 张参考图，元素必须带完整字段。
+  const refs = (Array.isArray(image) ? image : image ? [image] : []).slice(0, 9)
+  if (refs.length) {
+    body.images = refs.map((im) => {
+      const info: { [k: string]: unknown } = { fileId: im.fileId }
+      if (im.originUrl) info.originUrl = im.originUrl
+      if (im.thumbnailUrl) info.thumbnailUrl = im.thumbnailUrl
+      if (im.width && im.height) info.extra = { width: im.width, height: im.height }
+      return info
+    })
   }
   const r = await call<{ moment?: { id?: string } }>('/moment.v1.MomentService/CreateMoment', body)
   return r.moment?.id ?? ''

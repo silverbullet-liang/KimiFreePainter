@@ -100,4 +100,19 @@
     <string name="minutes">%1$d 分钟</string>
     <string name="days">%1$d 天</string>
     <string name="clear_history_confirm">清空全部历史记录？</string>
+    <string name="mode_normal">生图</string>
+    <string name="mode_comic">漫画</string>
+    <string name="mode_clean">去水印</string>
+    <string name="paint_pick_refs">添加参考图（%1$d/9）</string>
+    <string name="comic_count">格数</string>
+    <string name="comic_bg">统一背景</string>
+    <string name="comic_style">统一风格</string>
+    <string name="comic_cell">第 %1$d 格</string>
+    <string name="comic_hint">每格会单独生图，背景与风格自动附加</string>
+    <string name="wm_position">水印位置</string>
+    <string name="wm_content">水印内容</string>
+    <string name="wm_custom">自定义位置</string>
+    <string name="wm_hint">通过提示词让画师重绘无水印图</string>
+    <string name="comic_start">开始生成漫画</string>
+    <string name="wm_custom_tip">展开位置选择</string>
 </resources>

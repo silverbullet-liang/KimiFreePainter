@@ -12,6 +12,7 @@ import com.kimifreepainter.data.db.Watermark
 import com.kimifreepainter.data.settings.CleanMode
 import com.kimifreepainter.data.settings.Settings
 import com.kimifreepainter.data.settings.SettingsRepository
+import com.kimifreepainter.util.ComicStitch
 import com.kimifreepainter.util.ImageSaver
 import com.kimifreepainter.util.TextUtil
 import kotlinx.coroutines.CoroutineScope
@@ -62,7 +63,15 @@ class PaintEngine(context: Context) {
         }
     }
 
-    suspend fun submit(prompt: String, inputBytes: ByteArray? = null): Long? {
+    suspend fun submit(
+        prompt: String,
+        inputBytes: ByteArray? = null,
+        refs: List<ByteArray> = emptyList(),
+        mode: String = "normal",
+        comicGroup: String? = null,
+        comicIndex: Int = 0,
+        comicTotal: Int = 0
+    ): Long? {
         if (prompt.isBlank()) return null
         if (db.tasks().activeCount() >= 10) return null
         val cfg = settingsRepo.flow.first()
@@ -72,13 +81,21 @@ class PaintEngine(context: Context) {
                 status = TaskStatus.QUEUED.name,
                 botUserId = cfg.botUserId,
                 botName = cfg.botName,
-                createdAt = System.currentTimeMillis()
+                createdAt = System.currentTimeMillis(),
+                mode = mode,
+                comicGroup = comicGroup,
+                comicIndex = comicIndex,
+                comicTotal = comicTotal
             )
         )
         // 选图立刻落到任务目录：相册的临时授权在后台任务里不可靠
-        if (inputBytes != null && inputBytes.isNotEmpty()) {
-            val f = ImageSaver.saveInput(app, id, inputBytes)
-            db.tasks().byId(id)?.let { db.tasks().update(it.copy(inputImagePath = f.absolutePath)) }
+        val all = refs.take(9).ifEmpty { listOfNotNull(inputBytes?.takeIf { it.isNotEmpty() }) }
+        val paths = all.mapIndexed { i, bytes -> ImageSaver.saveInput(app, id, bytes, i).absolutePath }
+        if (paths.isNotEmpty()) {
+            db.tasks().byId(id)?.let { db.tasks().update(it.copy(
+                inputImagePath = paths.first(),
+                inputPaths = JSONArray(paths).toString()
+            )) }
         }
         queue.send(id)
         return id
@@ -151,9 +168,9 @@ class PaintEngine(context: Context) {
             val watermark = currentWatermark(ownerId)
             val seen = db.moments().all().toHashSet()
 
-            // 3) 发帖
-            val image = uploadInput(task.inputImagePath)
-            val triggerId = createWithRetry(task.prompt, bot.first, bot.second, image)
+            // 3) 发帖：最多 9 张参考图，第一张作为主图
+            val images = uploadInputs(task)
+            val triggerId = createWithRetry(task.prompt, bot.first, bot.second, images.firstOrNull(), images.drop(1))
             if (triggerId.isEmpty()) {
                 fail(taskId, -1, "发帖未返回 ID")
                 return
@@ -203,11 +220,12 @@ class PaintEngine(context: Context) {
 
             // 5) 下载（字节直存）
             val paths = mutableListOf<String>()
-            moment.images.forEachIndexed { idx, img ->
+            // 输出永远只有一张
+            moment.images.firstOrNull()?.let { img ->
                 if (cancelled(taskId)) return
                 val bytes = downloadWithRetry(img.best)
                 if (bytes != null) {
-                    val f = ImageSaver.saveToHistory(app, taskId, idx, bytes)
+                    val f = ImageSaver.saveToHistory(app, taskId, 0, bytes)
                     paths += f.absolutePath
                 }
             }
@@ -218,7 +236,7 @@ class PaintEngine(context: Context) {
             db.tasks().update(
                 db.tasks().byId(taskId)!!.copy(
                     status = TaskStatus.CLEANING.name,
-                    imageUrls = JSONArray(moment.images.map { it.best }).toString(),
+                    imageUrls = JSONArray(listOfNotNull(moment.images.firstOrNull()?.best)).toString(),
                     localPaths = JSONArray(paths).toString()
                 )
             )
@@ -232,6 +250,7 @@ class PaintEngine(context: Context) {
                     finishedAt = System.currentTimeMillis()
                 )
             }
+            if (!task.comicGroup.isNullOrEmpty()) finalizeComic(task.comicGroup, task.comicTotal)
         } catch (e: ApiException) {
             if (!cancelled(taskId)) fail(taskId, e.code, e.message ?: "请求失败")
         } catch (e: Exception) {
@@ -258,6 +277,36 @@ class PaintEngine(context: Context) {
         return w
     }
 
+    /** 同组全部分格完成后拼成长图，结果写回组内最后一格。 */
+    private suspend fun finalizeComic(group: String, total: Int) {
+        val all = db.tasks().observeAll().first().filter { it.comicGroup == group }
+        if (all.size < total || all.any { it.status != TaskStatus.DONE.name }) return
+        val paths = all.mapNotNull { t ->
+            runCatching { JSONArray(t.localPaths ?: "[]").optString(0) }.getOrNull()?.takeIf { it.isNotEmpty() }
+        }
+        if (paths.size < all.size) return
+        val last = all.maxByOrNull { it.finishedAt ?: 0L } ?: return
+        val out = File(app.filesDir, "history/${last.id}/comic.png")
+        val stitched = ComicStitch.stitch(paths, out) ?: return
+        db.tasks().byId(last.id)?.let { cur ->
+            db.tasks().update(cur.copy(
+                stitchedPath = stitched.absolutePath,
+                localPaths = JSONArray(listOf(stitched.absolutePath)).toString(),
+                title = "漫画长图"
+            ))
+        }
+    }
+
+    /** 参考图上传；失败的图跳过，全部失败退化为纯文生图。 */
+    private suspend fun uploadInputs(task: PainterTask): List<KimiApi.UploadedImage> {
+        val paths = mutableListOf<String>()
+        task.inputImagePath?.let { paths += it }
+        runCatching { JSONArray(task.inputPaths ?: "[]") }.getOrNull()?.let { arr ->
+            for (i in 0 until arr.length()) arr.optString(i).takeIf { it.isNotEmpty() }?.let { paths += it }
+        }
+        return paths.distinct().take(9).mapNotNull { uploadInput(it) }
+    }
+
     /** 底图上传；没有底图或上传失败返回 null（退化为纯文生图）。 */
     private suspend fun uploadInput(path: String?): KimiApi.UploadedImage? {
         if (path.isNullOrEmpty()) return null
@@ -282,12 +331,13 @@ class PaintEngine(context: Context) {
         prompt: String,
         botId: String,
         botName: String,
-        image: KimiApi.UploadedImage?
+        image: KimiApi.UploadedImage?,
+        extraImages: List<KimiApi.UploadedImage> = emptyList()
     ): String {
         var attempt = 0
         while (true) {
             try {
-                return KimiApi.createMoment(prompt, botId, botName, image = image)
+                return KimiApi.createMoment(prompt, botId, botName, image = image, extraImages = extraImages)
             } catch (e: ApiException) {
                 // 带图被拒（参数或审核）时，去掉图片再发一次，别让整单卡死
                 if (image != null && e.code != 429 && e.code != 401 && e.code != 403) {
@@ -313,13 +363,12 @@ class PaintEngine(context: Context) {
         seen: Set<String>,
         cfg: Settings
     ): KimiApi.Moment? {
-        val prompt = db.tasks().byId(taskId)?.prompt.orEmpty()
         val deadline = System.currentTimeMillis() + cfg.timeoutSec * 1000L
         val interval = cfg.pollIntervalSec * 1000L
         var strikes = 0
         while (System.currentTimeMillis() < deadline) {
             delay(interval)
-            val hit = runCatching { MomentProbe.scan(triggerId, prompt, watermark, ownerId, seen) }.getOrNull()
+            val hit = runCatching { MomentProbe.scan(triggerId, watermark, ownerId, seen) }.getOrNull()
             if (hit != null) return hit
             // 中途被取消
             val cur = db.tasks().byId(taskId) ?: return null

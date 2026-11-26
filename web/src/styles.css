@@ -165,3 +165,37 @@ button.ghost.small { padding: 6px 12px; border-radius: 10px; font-size: 13px; }
 
 .hint.ver { cursor: default; user-select: none; }
 .hint.ver:hover { color: var(--accent); }
+
+/* 模式选择：与原 MD3 令牌一致的分段按钮 / 筛选芯片 */
+.modes { display: flex; gap: 8px; }
+.modes button {
+  flex: 1; padding: 9px 6px; border-radius: 12px; background: var(--card);
+  border: 1px solid var(--line); color: var(--muted); font-size: 14px;
+  transition: background-color .15s;
+}
+.modes button:hover { background: color-mix(in srgb, var(--accent) 8%, var(--card)); }
+.modes button.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
+.field > label { display: block; font-size: 13px; color: var(--muted); margin: 0 0 6px; }
+.row-field { display: flex; align-items: center; justify-content: space-between; }
+.stepper { display: flex; align-items: center; gap: 12px; }
+.stepper button {
+  width: 40px; height: 40px; border-radius: 12px; background: var(--card);
+  border-color: var(--line); color: var(--fg); font-size: 18px; line-height: 1;
+}
+.stepper b { min-width: 18px; text-align: center; }
+.wm-pos { display: flex; align-items: center; gap: 8px; }
+.chips { display: flex; flex: 1; flex-wrap: wrap; gap: 8px; }
+.chips button {
+  padding: 8px 12px; border-radius: 12px; font-size: 13px;
+  background: var(--card); border-color: var(--line); color: var(--muted);
+}
+.chips button.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.wm-pos .arrow {
+  width: 42px; height: 42px; flex: none; border-radius: 12px;
+  background: var(--card); border-color: var(--line); color: var(--accent); font-size: 17px;
+}
+.cells { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.cells img {
+  width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 12px;
+  border: 1px solid var(--line); user-select: none; -webkit-user-drag: none;
+}

@@ -100,4 +100,19 @@
     <string name="minutes">%1$d min</string>
     <string name="days">%1$d d</string>
     <string name="clear_history_confirm">Clear all history?</string>
+    <string name="mode_normal">Draw</string>
+    <string name="mode_comic">Comic</string>
+    <string name="mode_clean">Remove watermark</string>
+    <string name="paint_pick_refs">Add references (%1$d/9)</string>
+    <string name="comic_count">Panels</string>
+    <string name="comic_bg">Shared background</string>
+    <string name="comic_style">Shared style</string>
+    <string name="comic_cell">Panel %1$d</string>
+    <string name="comic_hint">Each panel is generated separately with the shared background and style</string>
+    <string name="wm_position">Watermark position</string>
+    <string name="wm_content">Watermark text</string>
+    <string name="wm_custom">Custom position</string>
+    <string name="wm_hint">Removal is done by prompt-based redraw, no official API</string>
+    <string name="comic_start">Generate comic</string>
+    <string name="wm_custom_tip">Show position choices</string>
 </resources>

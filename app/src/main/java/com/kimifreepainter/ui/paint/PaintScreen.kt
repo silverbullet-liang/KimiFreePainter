@@ -3,6 +3,10 @@ package com.kimifreepainter.ui.paint
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,6 +30,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -38,6 +44,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -104,26 +111,50 @@ fun PaintScreen(
     val failed = tasks.filter {
         it.status == TaskStatus.FAILED.name || it.status == TaskStatus.CANCELLED.name
     }.take(6)
-    val queueFull = active.size >= 10
-    var sourceFile by remember { mutableStateOf<File?>(null) }
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        val ext = context.contentResolver.getType(uri)?.substringAfter('/', "jpg") ?: "jpg"
-        val f = File(context.cacheDir, "input_${System.currentTimeMillis()}.$ext")
-        val ok = runCatching {
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                f.outputStream().use { input.copyTo(it) }
-            } != null
-        }.getOrDefault(false)
-        if (ok && f.length() > 0) {
-            sourceFile?.delete()
-            sourceFile = f
-        } else {
-            f.delete()
-            toast = context.getString(R.string.paint_image_failed)
+    var mode by rememberSaveable { mutableStateOf("normal") }
+    var comicCount by rememberSaveable { mutableIntStateOf(4) }
+    var comicBg by rememberSaveable { mutableStateOf("") }
+    var comicStyle by rememberSaveable { mutableStateOf("") }
+    var cellTexts by remember { mutableStateOf(listOf("", "", "", "")) }
+    var wmPos by rememberSaveable { mutableStateOf("左上角") }
+    var wmCustom by rememberSaveable { mutableStateOf("") }
+    var wmCustomOn by rememberSaveable { mutableStateOf(false) }
+    var wmText by rememberSaveable { mutableStateOf("") }
+    var sources by remember { mutableStateOf<List<File>>(emptyList()) }
+    val needSlots = if (mode == "comic") comicCount else 1
+    val queueFull = active.size + needSlots > 10
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(9)) { uris ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        val added = mutableListOf<File>()
+        for (uri in uris.take(9 - sources.size)) {
+            val ext = context.contentResolver.getType(uri)?.substringAfter('/', "jpg") ?: "jpg"
+            val f = File(context.cacheDir, "input_${System.currentTimeMillis()}_${added.size}.$ext")
+            val ok = runCatching {
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    f.outputStream().use { input.copyTo(it) }
+                } != null
+            }.getOrDefault(false)
+            if (ok && f.length() > 0) added += f else f.delete()
         }
+        if (added.isNotEmpty()) sources = sources + added
+        else toast = context.getString(R.string.paint_image_failed)
     }
-    val canSubmit = prompt.isNotBlank() && !queueFull && AuthManager.isLoggedIn
+    val canSubmit = (!queueFull && AuthManager.isLoggedIn) && when (mode) {
+        "comic" -> cellTexts.take(comicCount).all { it.isNotBlank() }
+        "clean" -> wmText.isNotBlank()
+        else -> prompt.isNotBlank()
+    }
+
+    fun cleanPromptText(): String {
+        val where = if (wmCustomOn) wmCustom.ifBlank { "指定位置" } else wmPos
+        return "请去除图片${where}的水印「${wmText.trim()}」。只移除水印本身，完整保留原图的构图、人物、色彩、光影和清晰度，其余部分不要改动。输出一张不带任何水印的完整图片。"
+    }
+
+    fun comicPromptText(i: Int): String {
+        val cell = cellTexts.getOrNull(i).orEmpty().ifBlank { "第 ${i + 1} 格画面" }
+        return listOf(comicBg.trim(), comicStyle.trim(), cell).filter { it.isNotEmpty() }
+            .joinToString("，") + "。这是 ${comicCount} 格漫画中的第 ${i + 1} 格，只画这一格，输出一张单幅图片。"
+    }
 
     Column(Modifier.fillMaxSize()) {
         TopAppBar(
@@ -151,56 +182,116 @@ fun PaintScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
-                OutlinedTextField(
-                    value = prompt,
-                    onValueChange = { prompt = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    minLines = 4,
-                    maxLines = 8,
-                    placeholder = { Text(stringResource(R.string.paint_hint)) },
-                    supportingText = {
-                        Text(
-                            stringResource(R.string.paint_counter, prompt.length),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    },
-                    shape = RoundedCornerShape(14.dp)
-                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    listOf("normal" to R.string.mode_normal, "comic" to R.string.mode_comic, "clean" to R.string.mode_clean).forEach { (key, label) ->
+                        OutlinedButton(
+                            onClick = { mode = key },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(14.dp)
+                        ) { Text(stringResource(label), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                    }
+                }
+            }
+
+            if (mode == "normal") {
+                item {
+                    OutlinedTextField(
+                        value = prompt,
+                        onValueChange = { prompt = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 4,
+                        maxLines = 8,
+                        placeholder = { Text(stringResource(R.string.paint_hint)) },
+                        supportingText = {
+                            Text(stringResource(R.string.paint_counter, prompt.length), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        },
+                        shape = RoundedCornerShape(14.dp)
+                    )
+                }
+            }
+
+            if (mode == "comic") {
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text(stringResource(R.string.comic_count), style = MaterialTheme.typography.bodyMedium)
+                            TextButton(onClick = {
+                                comicCount = (comicCount - 1).coerceAtLeast(1)
+                                cellTexts = cellTexts.take(comicCount)
+                            }) { Text("−") }
+                            Text("$comicCount", style = MaterialTheme.typography.titleMedium)
+                            TextButton(onClick = {
+                                comicCount = (comicCount + 1).coerceAtMost(9)
+                                cellTexts = cellTexts + List(comicCount - cellTexts.size) { "" }
+                            }) { Text("+") }
+                        }
+                        OutlinedTextField(value = comicBg, onValueChange = { comicBg = it }, label = { Text(stringResource(R.string.comic_bg)) }, modifier = Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(14.dp))
+                        OutlinedTextField(value = comicStyle, onValueChange = { comicStyle = it }, label = { Text(stringResource(R.string.comic_style)) }, modifier = Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(14.dp))
+                        Text(stringResource(R.string.comic_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                items(comicCount) { i ->
+                    OutlinedTextField(
+                        value = cellTexts.getOrNull(i).orEmpty(),
+                        onValueChange = { v -> cellTexts = cellTexts.toMutableList().also { if (i < it.size) it[i] = v else it.add(v) } },
+                        label = { Text(stringResource(R.string.comic_cell, i + 1)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2,
+                        maxLines = 5,
+                        shape = RoundedCornerShape(14.dp)
+                    )
+                }
+            }
+
+            if (mode == "clean") {
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(stringResource(R.string.wm_position), style = MaterialTheme.typography.labelLarge)
+                        if (wmCustomOn) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                OutlinedTextField(value = wmCustom, onValueChange = { wmCustom = it }, label = { Text(stringResource(R.string.wm_custom)) }, modifier = Modifier.weight(1f), singleLine = true, shape = RoundedCornerShape(14.dp))
+                                IconButton(onClick = { wmCustomOn = false }) { Icon(Icons.Outlined.Brush, stringResource(R.string.wm_custom_tip)) }
+                            }
+                        } else {
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                listOf("左上角", "右上角", "左下角", "右下角", "中央", "四周").forEach { p ->
+                                    FilterChip(selected = wmPos == p, onClick = { wmPos = p }, label = { Text(p) })
+                                }
+                            }
+                            TextButton(onClick = { wmCustomOn = true }) { Text(stringResource(R.string.wm_custom)) }
+                        }
+                        OutlinedTextField(value = wmText, onValueChange = { wmText = it }, label = { Text(stringResource(R.string.wm_content)) }, modifier = Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(14.dp))
+                        Text(stringResource(R.string.wm_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
             }
 
             item {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = {
-                            picker.launch(
-                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                            )
-                        },
-                        shape = RoundedCornerShape(14.dp)
-                    ) { Text(stringResource(R.string.paint_pick_image)) }
-                    val f = sourceFile
-                    if (f != null && f.exists()) {
-                        AsyncImage(
-                            model = f,
-                            contentDescription = null,
-                            modifier = Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)),
-                            contentScale = ContentScale.Crop
-                        )
-                        TextButton(onClick = { f.delete(); sourceFile = null }) {
-                            Text(stringResource(R.string.paint_clear_image))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedButton(onClick = {
+                        picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    }, shape = RoundedCornerShape(14.dp)) { Text(stringResource(R.string.paint_pick_refs, sources.size)) }
+                }
+            }
+            if (sources.isNotEmpty()) {
+                item {
+                    Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            sources.forEachIndexed { i, f ->
+                                Box {
+                                    AsyncImage(model = f, contentDescription = null, modifier = Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop)
+                                    IconButton(onClick = { f.delete(); sources = sources.filterIndexed { k, _ -> k != i } }, modifier = Modifier.size(24.dp).align(Alignment.TopEnd)) {
+                                        Icon(Icons.Outlined.Warning, stringResource(R.string.paint_clear_image), tint = MaterialTheme.colorScheme.error)
+                                    }
+                                }
+                            }
                         }
-                    }
                 }
             }
 
             item {
                 Button(
                     onClick = {
-                        val text = prompt.trim()
-                        if (text.isEmpty()) {
+                        if (mode == "normal" && prompt.isBlank() || mode == "clean" && wmText.isBlank()) {
                             toast = context.getString(R.string.err_prompt_empty)
                             return@Button
                         }
@@ -213,23 +304,31 @@ fun PaintScreen(
                             toast = context.getString(R.string.queue_full)
                             return@Button
                         }
-                        val bytes = sourceFile?.takeIf { it.exists() }?.readBytes()
                         scope.launch {
-                            val id = engine.submit(text, bytes)
-                            if (id == null) {
-                                toast = context.getString(R.string.queue_full)
+                            val bytesList = withContext(Dispatchers.IO) {
+                                sources.filter { it.exists() }.mapNotNull { runCatching { it.readBytes() }.getOrNull() }
+                            }
+                            if (mode == "comic") {
+                                val group = "comic-${System.currentTimeMillis()}"
+                                var submitted = 0
+                                for (i in 0 until comicCount) {
+                                    val id = engine.submit(comicPromptText(i), refs = bytesList, mode = "comic", comicGroup = group, comicIndex = i, comicTotal = comicCount)
+                                    if (id == null) break
+                                    submitted++
+                                }
+                                if (submitted == 0) toast = context.getString(R.string.queue_full)
+                                else { cellTexts = List(comicCount) { "" }; sources.forEach { it.delete() }; sources = emptyList() }
                             } else {
-                                prompt = ""
-                                sourceFile?.delete()
-                                sourceFile = null
+                                val id = engine.submit(if (mode == "clean") cleanPromptText() else prompt.trim(), refs = bytesList, mode = mode)
+                                if (id == null) toast = context.getString(R.string.queue_full)
+                                else { prompt = ""; wmText = ""; sources.forEach { it.delete() }; sources = emptyList() }
                             }
                         }
                     },
                     enabled = canSubmit,
-                    modifier = Modifier.fillMaxWidth().height(48.dp)
-                ) {
-                    Text(stringResource(R.string.paint_submit))
-                }
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(14.dp)
+                ) { Text(stringResource(if (mode == "comic") R.string.comic_start else R.string.paint_submit)) }
             }
 
             if (toast != null) {
@@ -453,7 +552,7 @@ private fun ResultCard(task: PainterTask, onOpen: () -> Unit, onSave: () -> Unit
     }
 }
 
-fun firstLocalPath(task: PainterTask): String? = runCatching {
+fun firstLocalPath(task: PainterTask): String? = task.stitchedPath?.takeIf { File(it).exists() } ?: runCatching {
     val arr = JSONArray(task.localPaths ?: "[]")
     if (arr.length() > 0) arr.getString(0) else null
 }.getOrNull()

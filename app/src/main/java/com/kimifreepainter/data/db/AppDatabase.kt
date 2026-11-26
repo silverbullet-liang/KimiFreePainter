@@ -26,6 +26,15 @@ data class PainterTask(
     val resultMomentId: String? = null,
     val title: String? = null,
     val inputImagePath: String? = null,
+    /** 多张参考图的本地路径（JSON 数组），单图仍写 inputImagePath */
+    val inputPaths: String? = null,
+    /** normal / comic / clean */
+    val mode: String = "normal",
+    /** 漫画任务组：同组全部完成后拼长图 */
+    val comicGroup: String? = null,
+    val comicIndex: Int = 0,
+    val comicTotal: Int = 0,
+    val stitchedPath: String? = null,
     val description: String? = null,
     val imageUrls: String = "[]",
     val localPaths: String? = null,
@@ -96,7 +105,7 @@ interface MomentDao {
     suspend fun setWatermark(w: Watermark)
 }
 
-@Database(entities = [PainterTask::class, SeenMoment::class, Watermark::class], version = 3, exportSchema = false)
+@Database(entities = [PainterTask::class, SeenMoment::class, Watermark::class], version = 4, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun tasks(): TaskDao
     abstract fun moments(): MomentDao
@@ -117,9 +126,22 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                listOf(
+                    "ALTER TABLE painter_task ADD COLUMN inputPaths TEXT",
+                    "ALTER TABLE painter_task ADD COLUMN mode TEXT NOT NULL DEFAULT 'normal'",
+                    "ALTER TABLE painter_task ADD COLUMN comicGroup TEXT",
+                    "ALTER TABLE painter_task ADD COLUMN comicIndex INTEGER NOT NULL DEFAULT 0",
+                    "ALTER TABLE painter_task ADD COLUMN comicTotal INTEGER NOT NULL DEFAULT 0",
+                    "ALTER TABLE painter_task ADD COLUMN stitchedPath TEXT"
+                ).forEach { db.execSQL(it) }
+            }
+        }
+
         fun get(context: Context): AppDatabase = inst ?: synchronized(this) {
             inst ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "kimpainter.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build().also { inst = it }
         }
     }

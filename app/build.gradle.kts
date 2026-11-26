@@ -20,8 +20,8 @@ android {
         applicationId = "com.kimifreepainter"
         minSdk = 26
         targetSdk = 35
-        versionCode = 150
-        versionName = "1.5.0"
+        versionCode = 170
+        versionName = "1.7.0"
         resourceConfigurations += listOf("zh", "en")
     }
 

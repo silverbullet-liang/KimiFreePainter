@@ -31,9 +31,10 @@ object ImageSaver {
     }
 
     /** 存用户选定的底图（改图用），返回绝对路径。 */
-    fun saveInput(context: Context, taskId: Long, bytes: ByteArray): File {
+    fun saveInput(context: Context, taskId: Long, bytes: ByteArray, index: Int = 0): File {
         val dir = File(context.filesDir, "history/$taskId").apply { mkdirs() }
-        val f = File(dir, "input.${ext(bytes)}")
+        val name = if (index == 0) "input.${ext(bytes)}" else "input_$index.${ext(bytes)}"
+        val f = File(dir, name)
         f.writeBytes(bytes)
         return f
     }
