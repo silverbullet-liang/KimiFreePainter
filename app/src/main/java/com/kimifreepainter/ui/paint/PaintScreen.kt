@@ -141,7 +141,7 @@ fun PaintScreen(
     }
     val canSubmit = (!queueFull && AuthManager.isLoggedIn) && when (mode) {
         "comic" -> cellTexts.take(comicCount).all { it.isNotBlank() }
-        "clean" -> wmText.isNotBlank()
+        "clean" -> wmText.isNotBlank() && sources.isNotEmpty()
         else -> prompt.isNotBlank()
     }
 
@@ -293,6 +293,10 @@ fun PaintScreen(
                     onClick = {
                         if (mode == "normal" && prompt.isBlank() || mode == "clean" && wmText.isBlank()) {
                             toast = context.getString(R.string.err_prompt_empty)
+                            return@Button
+                        }
+                        if (mode == "clean" && sources.isEmpty()) {
+                            toast = context.getString(R.string.err_clean_image)
                             return@Button
                         }
                         if (!AuthManager.isLoggedIn) {

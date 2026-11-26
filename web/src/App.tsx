@@ -262,6 +262,7 @@ export default function App() {
     if (status === 'posting' || status === 'waiting') return
     if (mode === 'normal' && !text) return
     if (mode === 'clean' && !wmText.trim()) { setError('请填写水印内容'); return }
+    if (mode === 'clean' && picks.length === 0) { setError('去水印必须先上传带水印的图片'); return }
     if (mode === 'comic' && cells.filter((c) => c.trim()).length !== comicCount) {
       setError(`请填满 ${comicCount} 格的提示词`); return
     }
@@ -463,7 +464,7 @@ export default function App() {
 
             <button className="primary" onClick={start} disabled={
               (mode === 'normal' && !prompt.trim()) ||
-              (mode === 'clean' && !wmText.trim()) ||
+              (mode === 'clean' && (!wmText.trim() || picks.length === 0)) ||
               status === 'posting' || status === 'waiting'
             }>
               {status === 'posting' ? '正在提交' : status === 'waiting' ? '画师正在创作' : '开始创作'}

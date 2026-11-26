@@ -115,4 +115,5 @@
     <string name="wm_hint">Removal is done by prompt-based redraw, no official API</string>
     <string name="comic_start">Generate comic</string>
     <string name="wm_custom_tip">Show position choices</string>
+    <string name="err_clean_image">Upload the watermarked image first</string>
 </resources>

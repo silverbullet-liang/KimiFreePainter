@@ -115,4 +115,5 @@
     <string name="wm_hint">通过提示词让画师重绘无水印图</string>
     <string name="comic_start">开始生成漫画</string>
     <string name="wm_custom_tip">展开位置选择</string>
+    <string name="err_clean_image">去水印必须先上传带水印的图片</string>
 </resources>
