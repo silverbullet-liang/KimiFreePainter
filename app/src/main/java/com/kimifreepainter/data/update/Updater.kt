@@ -28,10 +28,10 @@ object Updater {
 
     /** APK 下载：四个代理实测均可返回完整字节，直连最后兜底。 */
     private val downloadPrefixes = listOf(
-        "https://gh-proxy.com/",
-        "https://ghproxy.net/",
-        "https://ghproxy.vip/",
         "https://gh-proxy.org/",
+        "https://gh-proxy.com/",
+        "https://ghproxy.vip/",
+        "https://ghproxy.net/",
         ""
     )
 
@@ -107,9 +107,26 @@ object Updater {
             null
         }
 
-    /** 代理有时会回 HTML 错误页且状态码 200：用 ZIP 文件头校验是不是真 APK。 */
+    /**
+     * 代理可能回 HTML，也可能传一半就断开但状态码仍是 200。
+     * 校验 ZIP 头 + 末尾 EOCD 记录，并核对 content-length。
+     */
+    private fun completeApk(f: File, expected: Long): Boolean {
+        if (f.length() < 1024) return false
+        if (expected > 0 && f.length() != expected) return false
+        val b = f.readBytes()
+        if (b[0] != 0x50.toByte() || b[1] != 0x4b.toByte()) return false
+        for (i in (b.size - 22).coerceAtLeast(0) until b.size - 3) {
+            if (b[i] == 0x50.toByte() && b[i + 1] == 0x4b.toByte() &&
+                b[i + 2] == 0x05.toByte() && b[i + 3] == 0x06.toByte()
+            ) return true
+        }
+        return false
+    }
+
     private fun downloadOne(url: String, target: File, onProgress: (Int) -> Unit): File? = runCatching {
         target.parentFile?.mkdirs()
+        var total = -1L
         val req = Request.Builder()
             .url(url)
             .header("User-Agent", "KimiFreePainter")
@@ -117,7 +134,7 @@ object Updater {
         http.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) return@runCatching null
             val body = resp.body ?: return@runCatching null
-            val total = body.contentLength()
+            total = body.contentLength()
             var read = 0L
             target.outputStream().use { out ->
                 body.byteStream().use { input ->
@@ -132,13 +149,11 @@ object Updater {
                 }
             }
         }
-        val head = ByteArray(2)
-        target.inputStream().use { it.read(head) }
-        if (head[0] != 0x50.toByte() || head[1] != 0x4b.toByte()) {
+        if (!completeApk(target, total)) {
             target.delete()
             return@runCatching null
         }
-        target.takeIf { it.length() > 0 }
+        target
     }.getOrNull()
 
     /** 拉起系统安装器。Android 8+ 需要「安装未知应用」权限，缺失时系统会自己弹提示。 */
